@@ -1,4 +1,5 @@
 from pathlib import Path
+from PIL import Image
 import xml.etree.ElementTree as ET
 
 from torch.utils.data import Dataset
@@ -29,6 +30,30 @@ class IAMDataset(Dataset):
         else:
             raise ValueError(f"Invalid granularity: {self.granularity}")
 
+    def __getitem__(self, idx):
+        if self.granularity == "lines":
+            metadata = self.lines[idx]
+        elif self.granularity == "words":
+            metadata = self.words[idx]
+        elif self.granularity == "both":
+            if idx < len(self.lines):
+                metadata = self.lines[idx]
+            else:
+                metadata = self.words[idx-len(self.lines)]
+        else:
+            raise ValueError(f"Invalid granularity: {self.granularity}")
+        
+        image = Image.open(metadata["image_path"])
+
+        #ancora restituisce un'immagine ma deve restituire un tensore
+        return {
+            "image": image,
+            "id": metadata["id"],
+            "writer_id": metadata["writer_id"],
+            "text": metadata["text"],
+        }
+
+        
     def _load_metadata(self):
         for xml_path in self.xml_dir.glob("*.xml"):
 
