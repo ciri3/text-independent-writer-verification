@@ -1,65 +1,72 @@
-import random
 from pathlib import Path
-import pandas as pd
-from PIL import Image
-import torch
+import xml.etree.ElementTree as ET
+
 from torch.utils.data import Dataset
 
 
-class IAMWriterPairsDataset(Dataset):
+class IAMDataset(Dataset):
+    
 
-  def __init__(self, data_dir="data", transform=None):
-    self.data_dir = Path(data_dir)
-    self.transform = transform
+    def __init__(self, data_dir="data", granularity="lines"):
+        self.granularity = granularity
+        self.data_dir = Path(data_dir)
 
-    # 1. Parsing automatico delle cartelle
-    records = []
-    for writer_folder in self.data_dir.iterdir():
-      if writer_folder.is_dir():
-        writer_id = writer_folder.name
-        for img_path in writer_folder.glob("*.png"):
-          records.append({"image_path": str(img_path), "writer_id": writer_id})
+        self.lines_dir = self.data_dir / "lines"
+        self.words_dir = self.data_dir / "words"
+        self.xml_dir = self.data_dir / "xml"
 
-    self.df = pd.DataFrame(records)
-    self.writers = self.df["writer_id"].unique().tolist()
+        self.lines = []
+        self.words = []
+        self._load_metadata()
 
-    # Mappa writer -> lista di immagini
-    self.writer_to_images = (
-        self.df.groupby("writer_id")["image_path"].apply(list).to_dict()
-    )
+    def __len__(self):
+        if self.granularity == "lines":
+            return len(self.lines)
+        elif self.granularity == "words":
+            return len(self.words)
+        elif self.granularity == "both":
+            return len(self.lines) + len(self.words)
+        else:
+            raise ValueError(f"Invalid granularity: {self.granularity}")
 
-    # 2. Generazione delle coppie positive/negative
-    self.pairs = self._generate_pairs()
+    def _load_metadata(self):
+        for xml_path in self.xml_dir.glob("*.xml"):
 
-  def _generate_pairs(self):
-    pairs = []
-    for writer_id, img_paths in self.writer_to_images.items():
-      # Coppie positive (stesso writer)
-      if len(img_paths) >= 2:
-        for i in range(len(img_paths)):
-          for j in range(i + 1, len(img_paths)):
-            pairs.append((img_paths[i], img_paths[j], 1.0))
+            tree = ET.parse(xml_path)
+            root = tree.getroot()
+            writer_id = root.get("writer-id")
 
-      # Coppie negative (writer diversi)
-      for img_path in img_paths:
-        other_writer = random.choice([w for w in self.writers if w != writer_id])
-        other_img_path = random.choice(self.writer_to_images[other_writer])
-        pairs.append((img_path, other_img_path, 0.0))
+            handwritten_part = root.find("handwritten-part")
 
-    random.shuffle(pairs)
-    return pairs
+            for line in handwritten_part.findall("line"):
 
-  def __len__(self):
-    return len(self.pairs)
+                line_id = line.get("id")
+                line_text = line.get("text")
 
-  def __getitem__(self, idx):
-    img_path_a, img_path_b, label = self.pairs[idx]
+                parts = line_id.split("-")
+                line_image_path = self.lines_dir / parts[0] / "-".join(parts[:2]) / f"{line_id}.png"
 
-    img_a = Image.open(img_path_a).convert("L")
-    img_b = Image.open(img_path_b).convert("L")
+                line_sample = {
+                    "id": line_id,
+                    "writer_id": writer_id,
+                    "text": line_text,
+                    "image_path": line_image_path,
+                }
 
-    if self.transform:
-      img_a = self.transform(img_a)
-      img_b = self.transform(img_b)
+                self.lines.append(line_sample)
+                for word in line.findall("word"):
 
-    return img_a, img_b, torch.tensor(label, dtype=torch.float32)
+                    word_id = word.get("id")
+                    word_text = word.get("text")
+
+                    parts = word_id.split("-")
+                    word_image_path = self.words_dir / parts[0] / "-".join(parts[:2]) / f"{word_id}.png"   
+
+                    word_sample = {
+                        "id": word_id,
+                        "writer_id": writer_id,
+                        "text": word_text,
+                        "image_path": word_image_path,
+                  }
+
+                    self.words.append(word_sample)
