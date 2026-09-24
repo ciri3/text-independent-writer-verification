@@ -45,7 +45,7 @@ class IAMDataset(Dataset):
         else:
             raise ValueError(f"Invalid granularity: {self.granularity}")
         
-        image = Image.open(metadata["image_path"])
+        image = Image.open(metadata["image_path"]).convert("L")
 
         if self.transform is not None:
             image = self.transform(image)
