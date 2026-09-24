@@ -8,9 +8,10 @@ from torch.utils.data import Dataset
 class IAMDataset(Dataset):
     
 
-    def __init__(self, data_dir="data", granularity="lines"):
-        self.granularity = granularity
+    def __init__(self, data_dir="data", granularity="lines", transform=None):
         self.data_dir = Path(data_dir)
+        self.granularity = granularity
+        self.transform = transform
 
         self.lines_dir = self.data_dir / "lines"
         self.words_dir = self.data_dir / "words"
@@ -30,6 +31,7 @@ class IAMDataset(Dataset):
         else:
             raise ValueError(f"Invalid granularity: {self.granularity}")
 
+
     def __getitem__(self, idx):
         if self.granularity == "lines":
             metadata = self.lines[idx]
@@ -44,6 +46,9 @@ class IAMDataset(Dataset):
             raise ValueError(f"Invalid granularity: {self.granularity}")
         
         image = Image.open(metadata["image_path"])
+
+        if self.transform is not None:
+            image = self.transform(image)
 
         #ancora restituisce un'immagine ma deve restituire un tensore
         return {
