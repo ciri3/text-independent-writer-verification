@@ -90,7 +90,11 @@ class IAMDataset(Dataset):
                     word_text = word.get("text")
 
                     parts = word_id.split("-")
-                    word_image_path = self.words_dir / parts[0] / "-".join(parts[:2]) / f"{word_id}.png"   
+                    word_image_path = self.words_dir / parts[0] / "-".join(parts[:2]) / f"{word_id}.png"  
+                    
+                    # Salta il campione se l'immagine non esiste oppure è vuota
+                    if not word_image_path.exists() or word_image_path.stat().st_size == 0:
+                        continue 
 
                     word_sample = {
                         "id": word_id,
