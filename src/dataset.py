@@ -8,10 +8,15 @@ from torch.utils.data import Dataset
 class IAMDataset(Dataset):
     
 
-    def __init__(self, data_dir="data", granularity="lines", transform=None):
+    def __init__(self,
+                data_dir="data", 
+                granularity="lines", 
+                transform=None,
+                min_text_length=2):
         self.data_dir = Path(data_dir)
         self.granularity = granularity
         self.transform = transform
+        self.min_text_length = min_text_length
 
         self.lines_dir = self.data_dir / "lines"
         self.words_dir = self.data_dir / "words"
@@ -89,10 +94,15 @@ class IAMDataset(Dataset):
                     word_id = word.get("id")
                     word_text = word.get("text")
 
+                    num_alphanumeric = sum(char.isalnum() for char in word_text)
+                    if num_alphanumeric < self.min_text_length:
+                        continue
+
                     parts = word_id.split("-")
                     word_image_path = self.words_dir / parts[0] / "-".join(parts[:2]) / f"{word_id}.png"  
                     
                     # Salta il campione se l'immagine non esiste oppure è vuota
+                    #valutare se fare saltare le immagini troppo piccole come quelle che contengono solo un punto o una virgola
                     if not word_image_path.exists() or word_image_path.stat().st_size == 0:
                         continue 
 
