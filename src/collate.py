@@ -13,7 +13,7 @@ def pad_collate(batch):
     for image in images1:
         padding_width = max_width - image.shape[2]
 
-        padded_image = F.pad(image, (0, padding_width, 0, 0))
+        padded_image = F.pad(image, (0, padding_width, 0, 0), value=1.0)
 
         padded_images1.append(padded_image)
 
@@ -22,7 +22,7 @@ def pad_collate(batch):
     for image in images2:
         padding_width = max_width - image.shape[2]
 
-        padded_image = F.pad(image, (0, padding_width, 0, 0))
+        padded_image = F.pad(image, (0, padding_width, 0, 0), value=1.0)
 
         padded_images2.append(padded_image)
 
