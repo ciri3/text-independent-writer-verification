@@ -6,6 +6,8 @@ from collections import Counter
 from torchvision.transforms import Compose, ToTensor
 from torch.utils.data import DataLoader
 from src.collate import pad_collate
+from src.models.siamese import SiameseNetwork
+from src.losses import ContrastiveLoss
 
 
 # Definiamo le trasformazioni da applicare alle immagini
@@ -131,3 +133,16 @@ print("Image1:", batch["image1"].shape)
 print("Image2:", batch["image2"].shape)
 print("Label:", batch["label"].shape)
 print("Labels:", batch["label"])
+
+#test modello
+model = SiameseNetwork(embedding_dim=128)
+criterion = ContrastiveLoss(margin=1.0)
+
+output1, output2 = model(batch["image1"], batch["image2"])
+
+print("\nTest modello:")
+print("Output1:", output1.shape)
+print("Output2:", output2.shape)
+
+loss = criterion(output1, output2, batch["label"])
+print("Loss:", loss.item())
