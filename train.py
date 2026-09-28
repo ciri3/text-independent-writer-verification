@@ -11,17 +11,19 @@ from src.siamese_dataset import SiameseDataset
 from src.collate import pad_collate
 from src.losses import ContrastiveLoss
 from src.models.siamese import SiameseNetwork
-
+from src.evaluation import collect_distances, find_best_threshold, calculate_metrics
 
 def main():
     BATCH_SIZE = 32
-    EPOCHS = 1
-    train = 4000
-    val = 1000
-    test = 1000
+    EPOCHS = 15
+    TRAIN_PAIRS = 32768
+    VAL_PAIRS = 4096
+    TEST_PAIRS = 8192
     LEARNING_RATE = 0.001
     EMBEDDING_DIM = 128
     MARGIN = 1.0
+
+    IMAGE_HEIGHT = 64
 
     device = torch.device(
         "cuda"
@@ -32,7 +34,7 @@ def main():
     print(f"Utilizzo device: {device}")
 
     transform = Compose([
-      ResizeHeight(64),
+      ResizeHeight(IMAGE_HEIGHT),
       ToTensor()
     ])
 
@@ -47,13 +49,13 @@ def main():
     train_dataset = SiameseDataset(
       dataset,
       train_indices,
-      number_of_pairs=train,
+      number_of_pairs=TRAIN_PAIRS,
     )
 
     val_dataset = SiameseDataset(
       dataset,
       val_indices,
-      number_of_pairs=val,
+      number_of_pairs=VAL_PAIRS,
       fixed=True,
       seed=42
     ) 
@@ -61,7 +63,7 @@ def main():
     test_dataset = SiameseDataset(
       dataset,
       test_indices,
-      number_of_pairs=test,
+      number_of_pairs=TEST_PAIRS,
       fixed=True,
       seed=42
     )
@@ -129,12 +131,39 @@ def main():
       val_loss = val_running_loss / len(val_loader)
       if val_loss < best_val_loss:
         best_val_loss = val_loss
-        torch.save(model.state_dict(), "best_model.pth")
+        torch.save({
+        "epoch": epoch + 1,
+        "model_state_dict": model.state_dict(),
+        "val_loss": val_loss,
+        "batch_size": BATCH_SIZE,
+        "train_pairs": TRAIN_PAIRS,
+        "val_pairs": VAL_PAIRS,
+        "test_pairs": TEST_PAIRS,
+        "learning_rate": LEARNING_RATE,
+        "embedding_dim": EMBEDDING_DIM,
+        "margin": MARGIN,
+        "image_height": IMAGE_HEIGHT
+        }, "best_model.pth")
 
       print(f"Epoch {epoch + 1}/{EPOCHS} - Train loss: {epoch_loss:.4f} - Val loss: {val_loss:.4f}")
 
-    model.load_state_dict(torch.load("best_model.pth", map_location=device))
+    #model.load_state_dict(torch.load("best_model.pth", map_location=device))
+    checkpoint = torch.load("best_model.pth", map_location=device)
+    model.load_state_dict(checkpoint["model_state_dict"])
+    print(f"Caricato modello migliore: epoca {checkpoint['epoch']}, val loss: {checkpoint['val_loss']:.4f}")
     model.eval()
+
+    val_distances, val_labels = collect_distances(model, val_loader, device)
+    best_threshold, best_accuracy = find_best_threshold(val_distances, val_labels)
+
+    print(f"Best threshold: {best_threshold:.4f} - Validation accuracy: {best_accuracy:.4f}")
+    torch.save({
+        "distances": val_distances,
+        "labels": val_labels,
+        "threshold": best_threshold,
+        "accuracy": best_accuracy
+    }, "validation_results.pt")
+
     test_running_loss = 0.0
 
     with torch.no_grad():
@@ -149,6 +178,22 @@ def main():
 
     test_loss = test_running_loss / len(test_loader)
     print(f"Test loss: {test_loss:.4f}")
+    test_distances, test_labels = collect_distances(model, test_loader, device)
+    test_metrics = calculate_metrics(test_distances, test_labels, best_threshold)
+    print(f"Test accuracy: {test_metrics['accuracy']:.4f}")
+    print(f"Precision: {test_metrics['precision']:.4f}")
+    print(f"Recall: {test_metrics['recall']:.4f}")
+    print(f"F1: {test_metrics['f1']:.4f}")
+    print(f"TP: {test_metrics['true_positive']} - TN: {test_metrics['true_negative']} - FP: {test_metrics['false_positive']} - FN: {test_metrics['false_negative']}")
+
+    torch.save({
+    "distances": test_distances,
+    "labels": test_labels,
+    "threshold": best_threshold,
+    "loss": test_loss,
+    "metrics": test_metrics
+    }, "test_results.pt")
+
 
 if __name__ == "__main__":
     main()
