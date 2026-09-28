@@ -112,7 +112,7 @@ class SiameseDataset(Dataset):
         return index1, index2
 
     def __len__(self):
-        return self.num_pairs
+        return self.number_of_pairs
 
     def __getitem__(self, idx):
 
