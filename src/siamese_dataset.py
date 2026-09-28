@@ -119,7 +119,9 @@ class SiameseDataset(Dataset):
             texts1 = set(self.writer_to_text_indices[writer1].keys())
             texts2 = set(self.writer_to_text_indices[writer2].keys())
 
-            common_texts = list(texts1.intersection(texts2))
+            #la vecchia implementazione non garantiva la risproducibilità 
+            #common_texts = list(texts1.intersection(texts2))
+            common_texts = sorted(texts1.intersection(texts2))
 
             if len(common_texts) > 0:
                 break
