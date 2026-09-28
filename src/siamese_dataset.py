@@ -1,12 +1,19 @@
 import random
 from torch.utils.data import Dataset
 
+#nel dataloader mettere random a false
 class SiameseDataset(Dataset):
-    def __init__(self, base_dataset, indices, number_of_pairs=100000):
+    def __init__(self, base_dataset, indices, number_of_pairs=100000, fixed = False, seed = 42):
 
         self.base_dataset = base_dataset
         self.indices = indices
         self.number_of_pairs = number_of_pairs
+
+
+        #il seed serve solo quando fixed è True per generare sempre le stesse coppie, altrimenti non ha effetto
+        self.fixed = fixed
+        self.seed = seed
+
 
         # Selezioniamo i metadati in base alla granularità del dataset
         if self.base_dataset.granularity == "words":
@@ -36,6 +43,19 @@ class SiameseDataset(Dataset):
 
         # Lista di tutti i writer disponibili in questo split
         self.writer_ids = list(self.writer_to_text_indices.keys())
+
+        #nuovo
+        self.fixed_pairs = None
+        if self.fixed:
+            random_state = random.getstate()
+            random.seed(self.seed)
+
+            self.fixed_pairs = []
+            for idx in range(self.number_of_pairs):
+                self.fixed_pairs.append(self._generate_pair(idx))
+
+            random.setstate(random_state)
+        #fine nuovo
 
     def _same_writer_different_text(self):
         while True:
@@ -111,9 +131,45 @@ class SiameseDataset(Dataset):
 
         return index1, index2
 
+    def _generate_pair(self, idx):
+        pair_type = idx % 4
+
+        if pair_type == 0:
+            index1, index2 = self._same_writer_different_text()
+            label = 1
+        elif pair_type == 1:
+            index1, index2 = self._same_writer_same_text()
+            label = 1
+        elif pair_type == 2:
+            index1, index2 = self._different_writer_different_text()
+            label = 0
+        else:
+            index1, index2 = self._different_writer_same_text()
+            label = 0
+
+        return index1, index2, label
+
     def __len__(self):
         return self.number_of_pairs
 
+    def __getitem__(self, idx):
+        if self.fixed:
+            index1, index2, label = self.fixed_pairs[idx]
+        else:
+            index1, index2, label = self._generate_pair(idx)
+
+        sample1 = self.base_dataset[index1]
+        sample2 = self.base_dataset[index2]
+
+        return {
+            "image1": sample1["image"],
+            "image2": sample2["image"],
+            "label": label
+        }
+
+
+    #vecchio metodo
+    """
     def __getitem__(self, idx):
 
         pair_type = idx % 4
@@ -139,3 +195,5 @@ class SiameseDataset(Dataset):
             "image2": sample2["image"],
             "label": label
         }
+        
+    """
