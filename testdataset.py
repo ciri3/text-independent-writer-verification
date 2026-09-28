@@ -4,6 +4,8 @@ from src.split import split_by_writer
 from src.siamese_dataset import SiameseDataset
 from collections import Counter
 from torchvision.transforms import Compose, ToTensor
+from torch.utils.data import DataLoader
+from src.collate import pad_collate
 
 
 # Definiamo le trasformazioni da applicare alle immagini
@@ -114,3 +116,18 @@ print("Writer utilizzati:", len(writer_counts))
 print("Min:", min(counts))
 print("Max:", max(counts))
 print("Media:", sum(counts) / len(counts))
+
+train_loader = DataLoader(
+    train_siamese,
+    batch_size=32,
+    shuffle=True,
+    collate_fn=pad_collate
+)
+
+batch = next(iter(train_loader))
+
+print("\nTest DataLoader:")
+print("Image1:", batch["image1"].shape)
+print("Image2:", batch["image2"].shape)
+print("Label:", batch["label"].shape)
+print("Labels:", batch["label"])
