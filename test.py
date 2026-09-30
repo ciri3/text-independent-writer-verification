@@ -1,80 +1,119 @@
 from pathlib import Path
 import torch
 import torch.nn.functional as F
-from torchvision import transforms
+from torchvision.transforms import Compose, ToTensor
 from PIL import Image
 
 from src.models.siamese import SiameseNetwork
-from src.dataset import IAMWriterPairsDataset
-
+from src.dataset import IAMDataset
+from src.transforms import ResizeHeight
+from src.split import split_by_writer
+from src.siamese_dataset import SiameseDataset
+from src.evaluation import find_best_threshold, collect_distances, calculate_metrics
+from src.collate import pad_collate
+from torch.utils.data import DataLoader
 
 def main():
-    # 1. Configurazione del device (GPU o CPU)
-    if torch.cuda.is_available():
-        device = torch.device("cuda")
-    elif torch.backends.mps.is_available():
-        device = torch.device("mps")
-    else:
-        device = torch.device("cpu")
-    
+    device = torch.device(
+        "cuda" if torch.cuda.is_available() 
+        else "mps" if torch.backends.mps.is_available() 
+        else "cpu"
+    )
     print(f"Utilizzo device per il test: {device}")
 
-    # 2. Caricamento del modello con i pesi salvati
-    model_path = "siamese_writer_model.pth"
-    if not Path(model_path).exists():
+    # Percorsi dei file generati dal training
+    output_dir = Path("outputs")
+    #model_path = output_dir / "best_model.pth"
+    model_path = Path("best_model.pth")
+    #val_results_path = output_dir / "validation_results.pt"
+    val_results_path = Path("validation_results.pt")
+
+    if not model_path.exists():
         print(f"Errore: File dei pesi '{model_path}' non trovato. Esegui prima 'train.py'.")
         return
 
+    # Caricamento del modello migliore
     embedding_dim = 128
     model = SiameseNetwork(embedding_dim=embedding_dim).to(device)
-    model.load_state_dict(torch.load(model_path, map_location=device))
+    
+    checkpoint = torch.load(model_path, map_location=device)
+    model.load_state_dict(checkpoint["model_state_dict"])
     model.eval() # Modalità valutazione
-    print(f"Modello caricato correttamente da '{model_path}'.")
+    print(f"Modello caricato correttamente da '{model_path}' (Epoca {checkpoint['epoch']}).")
 
-    # 3. Trasformazioni identiche a quelle usate nel training
-    transform = transforms.Compose([
-        transforms.Resize((128, 128)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.5], std=[0.5])
+    # Recupero della soglia ottimale salvata in validazione
+    ''' ------------ da reinserire quando train eseguito completo -------------
+    best_threshold = 0.5  # Valore di fallback di sicurezza
+    if val_results_path.exists():
+        val_data = torch.load(val_results_path, map_location=device)
+        best_threshold = val_data["threshold"]
+        print(f"Soglia ottimale caricata dal validation set: {best_threshold:.4f}")
+    else:
+        print(f"Avviso: 'validation_results.pt' non trovato. Uso soglia di default: {best_threshold}")
+    --------------------------------------------------------------------------
+    '''
+
+    # Trasformazioni coerenti con il training (ResizeHeight dinamico)
+    image_height = checkpoint.get("image_height", 64)
+    transform = Compose([
+        ResizeHeight(image_height),
+        ToTensor()
     ])
 
-    # 4. Caricamento del dataset di test
-    print("Caricamento campioni dal dataset...")
-    dataset = IAMWriterPairsDataset(data_dir="data", transform=transform)
+    # Ricostruzione esatta del Test Dataset (stesso split e stesso seed del training)
+    print("Caricamento dataset e configurazione test set...")
+    dataset = IAMDataset(data_dir="data", granularity="words", transform=transform)
+    _, val_indices, test_indices = split_by_writer(dataset)
 
-    # 5. Estrapoliamo non solo i tensori ma anche i percorsi reali e la label dal dataset di coppie
-    # (Nota: modifichiamo un attimo l'accesso per recuperare i path testuali)
-    sample_idx = 0  # Puoi cambiare indice per testare coppie diverse (es. 0, 1, 5, 10...)
-    img_path_a, img_path_b, label = dataset.pairs[sample_idx]
+    # ------------- da cancellare quando train eseguito completo -------------
+    val_dataset = SiameseDataset(dataset, val_indices, number_of_pairs=4096, fixed=True, seed=42)
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=32,
+        shuffle=False,
+        collate_fn=pad_collate
+    )
+    val_distances, val_labels = collect_distances(model, val_loader, device)
+    best_threshold, best_accuracy = find_best_threshold(val_distances, val_labels)
+    print(f"Best thresh: {best_threshold}, best accuracy: {best_accuracy}")
+    # ------------------------------------------------------------------------
     
-    # Carichiamo le immagini originali per l'inferenza
-    img_a = Image.open(img_path_a).convert("L")
-    img_b = Image.open(img_path_b).convert("L")
+    test_pairs_count = checkpoint.get("test_pairs", 8192)
+    test_dataset = SiameseDataset(
+        dataset,
+        test_indices,
+        number_of_pairs=test_pairs_count,
+        fixed=True,
+        seed=42
+    )
 
-    # Applichiamo le trasformazioni e aggiungiamo la dimensione del batch [1, C, H, W]
-    img1_tensor = transform(img_a).unsqueeze(0).to(device)
-    img2_tensor = transform(img_b).unsqueeze(0).to(device)
-
-    # 6. Inferenza
-    with torch.no_grad():
-        out1, out2 = model(img1_tensor, img2_tensor)
-        distance = F.pairwise_distance(out1, out2).item()
-
-    # 7. Stampa dei risultati e dei percorsi per la verifica
-    print("\n" + "="*40)
-    print("REPORT DI TEST - VERIFICA SCRITTORE")
     print("="*40)
-    print(f"Immagine A: {img_path_a}")
-    print(f"Immagine B: {img_path_b}")
+    print("INFERENZA - VERIFICA SCRITTORE")
+    # Estrazione di una coppia di esempio dal test set
+    sample_idx = [4, 79, 215, 343, 555]  # Puoi cambiare indice per testare coppie diverse (es. 0, 1, 5, 10...)
+    print(f"Coppie test selezionate: {sample_idx}")
     print("-"*40)
-    print(f"Etichetta Reale: {'Stesso Autore (1.0)' if label == 1.0 else 'Autori Diversi (0.0)'}")
-    print(f"Distanza Euclidea: {distance:.4f}")
+    for idx in sample_idx:
+        sample = test_dataset[idx]
     
-    # Soglia di decisione di esempio
-    threshold = 0.5 
-    prediction = "Stesso Autore" if distance < threshold else "Autori Diversi"
-    print(f"Verdetto del Modello (soglia={threshold}): {prediction}")
-    print("="*40)
+        # Applicazione trasformazioni e aggiunta della dimensione del batch [1, C, H, W]
+        img1_tensor = sample["image1"].unsqueeze(0).to(device)
+        img2_tensor = sample["image2"].unsqueeze(0).to(device)
+        label = sample["label"]
+
+        # Inferenza
+        with torch.no_grad():
+            out1, out2 = model(img1_tensor, img2_tensor)
+            distance = F.pairwise_distance(out1, out2).item()
+
+        # Stampa dei risultati e dei percorsi per la verifica visiva
+        print(f"Indice coppia test: {idx}")
+        print(f"Label: {'stesso autore (1)' if label == 1.0 else 'autori diversi (0)'}")
+        print(f"Distanza Euclidea: {distance:.4f}")
+        
+        prediction = "stesso autore" if distance < best_threshold else "autori diversi"
+        print(f"Verdetto modello (soglia ottimale={best_threshold:.4f}): {prediction}")
+        print("-"*40)
 
 
 if __name__ == "__main__":

@@ -13,9 +13,21 @@ from src.losses import ContrastiveLoss
 from src.models.siamese import SiameseNetwork
 from src.evaluation import collect_distances, find_best_threshold, calculate_metrics
 
+import time
+from pathlib import Path
+from src import logger
+
 def main():
+
+    # Configurazione cartella di output
+    output_dir = Path("outputs")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    logger = logger(output_dir) 
+    print(f"File di output salvati in: {output_dir.resolve()}")
+    
     BATCH_SIZE = 32
-    EPOCHS = 15
+    EPOCHS = 40
     TRAIN_PAIRS = 32768
     VAL_PAIRS = 4096
     TEST_PAIRS = 8192
@@ -25,13 +37,26 @@ def main():
 
     IMAGE_HEIGHT = 64
 
+    logger.log(f"Parametri di addestramento:\n",
+      "batch_size={BATCH_SIZE}\n",
+      "epochs={EPOCHS}\n", 
+      "train_pairs={TRAIN_PAIRS}\n", 
+      "val_pairs={VAL_PAIRS}\n", 
+      "test_pairs={TEST_PAIRS}\n",
+      "learning_rate={LEARNING_RATE}\n",
+      "embedding_dim={EMBEDDING_DIM}\n",
+      "margin={MARGIN}\n",
+      "image_height={IMAGE_HEIGHT}\n",
+      "-"*40
+    )
+
     device = torch.device(
         "cuda"
         if torch.cuda.is_available()
         else "mps" if torch.backends.mps.is_available() else "cpu"
     )
 
-    print(f"Utilizzo device: {device}")
+    logger.log(f"Utilizzo device: {device}")
 
     transform = Compose([
       ResizeHeight(IMAGE_HEIGHT),
@@ -90,16 +115,19 @@ def main():
       collate_fn=pad_collate
     ) 
 
-    print(f"Immagini training: {len(train_indices)}")
-    print(f"Coppie per epoca: {len(train_dataset)}")
-    print(f"Batch per epoca: {len(train_loader)}")
+    logger.log(f"Immagini training: {len(train_indices)}")
+    logger.log(f"Coppie per epoca: {len(train_dataset)}")
+    logger.log(f"Batch per epoca: {len(train_loader)}")
 
     model = SiameseNetwork(embedding_dim=EMBEDDING_DIM).to(device)
     criterion = ContrastiveLoss(margin=MARGIN)
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
     best_val_loss = float("inf")
+    total_start_time = time.time()    #1
+    epoch_times = []                  #2
     for epoch in range(EPOCHS):
+      epoch_start_time = time.time()  #3
       model.train()
       running_loss = 0.0
 
@@ -114,7 +142,9 @@ def main():
           loss.backward()
           optimizer.step()
           running_loss += loss.item()
-  
+
+      epoch_duration = time.time() - epoch_start_time #4
+      epoch_times.append(epoch_duration)              #5
       epoch_loss = running_loss / len(train_loader)
 
       model.eval()
@@ -143,26 +173,32 @@ def main():
         "embedding_dim": EMBEDDING_DIM,
         "margin": MARGIN,
         "image_height": IMAGE_HEIGHT
-        }, "best_model.pth")
+        }, "outputs/best_model.pth")
 
-      print(f"Epoch {epoch + 1}/{EPOCHS} - Train loss: {epoch_loss:.4f} - Val loss: {val_loss:.4f}")
+      #6
+      logger.log(f"Epoch {epoch + 1}/{EPOCHS}: {epoch_duration:.2f}s - Train loss: {epoch_loss:.4f} - Val loss: {val_loss:.4f}")
+
+    #7, 8 e 9
+    total_duration = time.time() - total_start_time
+    avg_epoch_duration = sum(epoch_times) / len(epoch_times)
+    logger.log(f"\n Training completato in {total_duration / 60:.2f}min, con una durata media per epoca di {avg_epoch_duration:.2f}s"+"-"*40)
 
     #model.load_state_dict(torch.load("best_model.pth", map_location=device))
-    checkpoint = torch.load("best_model.pth", map_location=device)
+    checkpoint = torch.load("outputs/best_model.pth", map_location=device)
     model.load_state_dict(checkpoint["model_state_dict"])
-    print(f"Caricato modello migliore: epoca {checkpoint['epoch']}, val loss: {checkpoint['val_loss']:.4f}")
+    logger.log(f"Caricato modello migliore: epoca {checkpoint['epoch']}, val loss: {checkpoint['val_loss']:.4f}")
     model.eval()
 
     val_distances, val_labels = collect_distances(model, val_loader, device)
     best_threshold, best_accuracy = find_best_threshold(val_distances, val_labels)
 
-    print(f"Best threshold: {best_threshold:.4f} - Validation accuracy: {best_accuracy:.4f}")
+    logger.log(f"Best threshold: {best_threshold:.4f} - Validation accuracy: {best_accuracy:.4f}")
     torch.save({
         "distances": val_distances,
         "labels": val_labels,
         "threshold": best_threshold,
         "accuracy": best_accuracy
-    }, "validation_results.pt")
+    }, "outputs/validation_results.pt")
 
     test_running_loss = 0.0
 
@@ -177,14 +213,14 @@ def main():
             test_running_loss += loss.item()
 
     test_loss = test_running_loss / len(test_loader)
-    print(f"Test loss: {test_loss:.4f}")
+    logger.log(f"Test loss: {test_loss:.4f}")
     test_distances, test_labels = collect_distances(model, test_loader, device)
     test_metrics = calculate_metrics(test_distances, test_labels, best_threshold)
-    print(f"Test accuracy: {test_metrics['accuracy']:.4f}")
-    print(f"Precision: {test_metrics['precision']:.4f}")
-    print(f"Recall: {test_metrics['recall']:.4f}")
-    print(f"F1: {test_metrics['f1']:.4f}")
-    print(f"TP: {test_metrics['true_positive']} - TN: {test_metrics['true_negative']} - FP: {test_metrics['false_positive']} - FN: {test_metrics['false_negative']}")
+    logger.log(f"Test accuracy: {test_metrics['accuracy']:.4f}")
+    logger.log(f"Precision: {test_metrics['precision']:.4f}")
+    logger.log(f"Recall: {test_metrics['recall']:.4f}")
+    logger.log(f"F1: {test_metrics['f1']:.4f}")
+    logger.log(f"TP: {test_metrics['true_positive']} - TN: {test_metrics['true_negative']} - FP: {test_metrics['false_positive']} - FN: {test_metrics['false_negative']}")
 
     torch.save({
     "distances": test_distances,
@@ -192,7 +228,10 @@ def main():
     "threshold": best_threshold,
     "loss": test_loss,
     "metrics": test_metrics
-    }, "test_results.pt")
+    }, "outputs/test_results.pt")
+
+    print(f"-"*40+"\nTutti i file e i log salvati correttamente in: {output_dir}")
+    logger.close()
 
 
 if __name__ == "__main__":

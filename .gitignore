@@ -227,7 +227,7 @@ checkpoints/
 *.ckpt
 
 # Training outputs
-runs/
+outputs/
 
 # macOS
 .DS_Store
