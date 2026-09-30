@@ -75,8 +75,22 @@ def main():
     )
     val_distances, val_labels = collect_distances(model, val_loader, device)
     best_threshold, best_accuracy = find_best_threshold(val_distances, val_labels)
+    best_threshold = 1.25
     print(f"Best thresh: {best_threshold}, best accuracy: {best_accuracy}")
     # ------------------------------------------------------------------------
+    test_dataset = SiameseDataset(
+        dataset,
+        test_indices,
+        number_of_pairs=8192,
+        fixed=True,
+        seed=42
+    )
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=32,
+        shuffle=False,
+        collate_fn=pad_collate
+    )
     
     test_pairs_count = checkpoint.get("test_pairs", 8192)
     test_dataset = SiameseDataset(
@@ -90,10 +104,10 @@ def main():
     print("="*40)
     print("INFERENZA - VERIFICA SCRITTORE")
     # Estrazione di una coppia di esempio dal test set
-    sample_idx = [4, 79, 215, 343, 555]  # Puoi cambiare indice per testare coppie diverse (es. 0, 1, 5, 10...)
-    print(f"Coppie test selezionate: {sample_idx}")
+    #sample_idx = [4, 79, 215, 343, 555]  # Puoi cambiare indice per testare coppie diverse (es. 0, 1, 5, 10...)
+    #print(f"Coppie test selezionate: {sample_idx}")
     print("-"*40)
-    for idx in sample_idx:
+    for idx in range(len(test_dataset)):
         sample = test_dataset[idx]
     
         # Applicazione trasformazioni e aggiunta della dimensione del batch [1, C, H, W]
@@ -114,6 +128,15 @@ def main():
         prediction = "stesso autore" if distance < best_threshold else "autori diversi"
         print(f"Verdetto modello (soglia ottimale={best_threshold:.4f}): {prediction}")
         print("-"*40)
+
+    print("Metriche di riferimento:")
+    test_distances, test_labels = collect_distances(model, test_loader, device)
+    test_metrics = calculate_metrics(test_distances, test_labels, best_threshold)
+    print(f"- Test accuracy: {test_metrics['accuracy']:.4f}")
+    print(f"- Precision: {test_metrics['precision']:.4f}")
+    print(f"- Recall: {test_metrics['recall']:.4f}")
+    print(f"- F1: {test_metrics['f1']:.4f}")
+    print(f"- TP: {test_metrics['true_positive']} - TN: {test_metrics['true_negative']} - FP: {test_metrics['false_positive']} - FN: {test_metrics['false_negative']}")
 
 
 if __name__ == "__main__":
