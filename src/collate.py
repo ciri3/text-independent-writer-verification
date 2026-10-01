@@ -34,4 +34,4 @@ def pad_collate(batch):
     "image1": images1,
     "image2": images2,
     "label": labels
-}
+    }

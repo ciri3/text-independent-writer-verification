@@ -10,7 +10,7 @@ class IAMDataset(Dataset):
 
     def __init__(self,
                 data_dir="data", 
-                granularity="lines", 
+                granularity="words", 
                 transform=None,
                 min_text_length=2):
         self.data_dir = Path(data_dir)

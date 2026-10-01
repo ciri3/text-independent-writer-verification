@@ -1,5 +1,5 @@
 from src.dataset import IAMDataset
-from src.transforms import ResizeHeight
+from src.transforms import ResizeAndPad
 from src.split import split_by_writer
 from src.siamese_dataset import SiameseDataset
 from collections import Counter
@@ -12,7 +12,7 @@ from src.losses import ContrastiveLoss
 
 # Definiamo le trasformazioni da applicare alle immagini
 transform = Compose([
-    ResizeHeight(64),
+    ResizeAndPad(64),
     ToTensor()
 ])
 

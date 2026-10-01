@@ -6,7 +6,7 @@ from PIL import Image
 
 from src.models.siamese import SiameseNetwork
 from src.dataset import IAMDataset
-from src.transforms import ResizeHeight
+from src.transforms import ResizeAndPad
 from src.split import split_by_writer
 from src.siamese_dataset import SiameseDataset
 from src.evaluation import find_best_threshold, collect_distances, calculate_metrics
@@ -56,7 +56,7 @@ def main():
     # Trasformazioni coerenti con il training (ResizeHeight dinamico)
     image_height = checkpoint.get("image_height", 64)
     transform = Compose([
-        ResizeHeight(image_height),
+        ResizeAndPad(image_height),
         ToTensor()
     ])
 
