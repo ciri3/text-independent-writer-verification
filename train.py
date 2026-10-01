@@ -31,7 +31,7 @@ def main():
     TRAIN_PAIRS = 32768
     VAL_PAIRS = 4096
     TEST_PAIRS = 8192
-    LEARNING_RATE = 0.0003
+    LEARNING_RATE = 0.001
     EMBEDDING_DIM = 128
     MARGIN = 1.0
 
@@ -127,10 +127,10 @@ def main():
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
     best_val_loss = float("inf")
-    total_start_time = time.time()    #1
-    epoch_times = []                  #2
+    total_start_time = time.time()    # Istante partenza training
+    epoch_times = []
     for epoch in range(EPOCHS):
-      epoch_start_time = time.time()  #3
+      epoch_start_time = time.time()  # Istante partenza epoca
       model.train()
       running_loss = 0.0
 
@@ -146,8 +146,8 @@ def main():
           optimizer.step()
           running_loss += loss.item()
 
-      epoch_duration = time.time() - epoch_start_time #4
-      epoch_times.append(epoch_duration)              #5
+      epoch_duration = time.time() - epoch_start_time
+      epoch_times.append(epoch_duration)
       epoch_loss = running_loss / len(train_loader)
 
       model.eval()
@@ -178,13 +178,11 @@ def main():
         "image_height": IMAGE_HEIGHT
         }, "outputs/best_model.pth")
 
-      #6
       log.log(f"Epoch {epoch + 1}/{EPOCHS}: {epoch_duration:.2f}s - Train loss: {epoch_loss:.4f} - Val loss: {val_loss:.4f}")
 
-    #7, 8 e 9
     total_duration = time.time() - total_start_time
     avg_epoch_duration = sum(epoch_times) / len(epoch_times)
-    log.log(f"\n Training completato in {total_duration / 60:.2f}min, con una durata media per epoca di {avg_epoch_duration:.2f}s"+"-"*40)
+    log.log(f"Training completato in {total_duration / 60:.2f}min, con una durata media per epoca di {avg_epoch_duration:.2f}s\n"+"-"*40)
 
     #model.load_state_dict(torch.load("best_model.pth", map_location=device))
     checkpoint = torch.load("outputs/best_model.pth", map_location=device)
@@ -233,7 +231,7 @@ def main():
     "metrics": test_metrics
     }, "outputs/test_results.pt")
 
-    print(f"-"*40+"\nTutti i file e i log salvati correttamente in: {output_dir}")
+    print(f"-"*40+f"\nTutti i file e i log salvati correttamente in: {output_dir}")
     log.close()
 
 

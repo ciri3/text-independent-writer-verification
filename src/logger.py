@@ -4,7 +4,7 @@ from pathlib import Path
 class Logger:
     """
     Gestisce scrittura simultanea dei log su terminale e
-    su file di testo all'interno di una cartella 'output'.
+    su file di testo all'interno di una cartella 'outputs'.
     """
     def __init__(self, output_dir: Path, filename: str = "training_log.txt"):
         self.terminal = sys.stdout

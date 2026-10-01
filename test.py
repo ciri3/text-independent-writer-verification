@@ -2,16 +2,15 @@ from pathlib import Path
 import torch
 import torch.nn.functional as F
 from torchvision.transforms import Compose, ToTensor
-from PIL import Image
+from torch.utils.data import DataLoader
 
 from src.models.siamese import SiameseNetwork
 from src.dataset import IAMDataset
-from src.transforms import ResizeAndPad
 from src.split import split_by_writer
 from src.siamese_dataset import SiameseDataset
-from src.evaluation import find_best_threshold, collect_distances, calculate_metrics
+from src.evaluation import collect_distances, calculate_metrics
+from src.transforms import ResizeAndPad
 from src.collate import pad_collate
-from torch.utils.data import DataLoader
 
 def main():
     device = torch.device(
@@ -23,10 +22,8 @@ def main():
 
     # Percorsi dei file generati dal training
     output_dir = Path("outputs")
-    #model_path = output_dir / "best_model.pth"
-    model_path = Path("best_model.pth")
-    #val_results_path = output_dir / "validation_results.pt"
-    val_results_path = Path("validation_results.pt")
+    model_path = output_dir / "best_model.pth"
+    val_results_path = output_dir / "validation_results.pt"
 
     if not model_path.exists():
         print(f"Errore: File dei pesi '{model_path}' non trovato. Esegui prima 'train.py'.")
@@ -42,55 +39,28 @@ def main():
     print(f"Modello caricato correttamente da '{model_path}' (Epoca {checkpoint['epoch']}).")
 
     # Recupero della soglia ottimale salvata in validazione
-    ''' ------------ da reinserire quando train eseguito completo -------------
-    best_threshold = 0.5  # Valore di fallback di sicurezza
+    best_threshold = 0
     if val_results_path.exists():
         val_data = torch.load(val_results_path, map_location=device)
         best_threshold = val_data["threshold"]
         print(f"Soglia ottimale caricata dal validation set: {best_threshold:.4f}")
     else:
-        print(f"Avviso: 'validation_results.pt' non trovato. Uso soglia di default: {best_threshold}")
-    --------------------------------------------------------------------------
-    '''
+        print(f"Avviso: 'validation_results.pt' non trovato\nChiusura...")
+        return
 
-    # Trasformazioni coerenti con il training (ResizeHeight dinamico)
+    # Aggiornamento delle trasformazioni con ResizeAndPad
     image_height = checkpoint.get("image_height", 64)
+    image_max_width = 320
+    
     transform = Compose([
-        ResizeAndPad(image_height),
+        ResizeAndPad(height=image_height, max_width=image_max_width),
         ToTensor()
     ])
 
     # Ricostruzione esatta del Test Dataset (stesso split e stesso seed del training)
     print("Caricamento dataset e configurazione test set...")
     dataset = IAMDataset(data_dir="data", granularity="words", transform=transform)
-    _, val_indices, test_indices = split_by_writer(dataset)
-
-    # ------------- da cancellare quando train eseguito completo -------------
-    val_dataset = SiameseDataset(dataset, val_indices, number_of_pairs=4096, fixed=True, seed=42)
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=32,
-        shuffle=False,
-        collate_fn=pad_collate
-    )
-    val_distances, val_labels = collect_distances(model, val_loader, device)
-    best_threshold, best_accuracy = find_best_threshold(val_distances, val_labels)
-    best_threshold = 1.25
-    print(f"Best thresh: {best_threshold}, best accuracy: {best_accuracy}")
-    # ------------------------------------------------------------------------
-    test_dataset = SiameseDataset(
-        dataset,
-        test_indices,
-        number_of_pairs=8192,
-        fixed=True,
-        seed=42
-    )
-    test_loader = DataLoader(
-        test_dataset,
-        batch_size=32,
-        shuffle=False,
-        collate_fn=pad_collate
-    )
+    _, _, test_indices = split_by_writer(dataset)
     
     test_pairs_count = checkpoint.get("test_pairs", 8192)
     test_dataset = SiameseDataset(
@@ -101,16 +71,25 @@ def main():
         seed=42
     )
 
+    # Creazione del DataLoader di test per le metriche globali
+    batch_size = checkpoint.get("batch_size", 32)
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        collate_fn=pad_collate
+    )
+
     print("="*40)
-    print("INFERENZA - VERIFICA SCRITTORE")
-    # Estrazione di una coppia di esempio dal test set
-    #sample_idx = [4, 79, 215, 343, 555]  # Puoi cambiare indice per testare coppie diverse (es. 0, 1, 5, 10...)
-    #print(f"Coppie test selezionate: {sample_idx}")
-    print("-"*40)
-    for idx in range(len(test_dataset)):
+    print("INFERENZA su test set - VERIFICA SCRITTORE")
+    print("\nStampa di alcune coppie di test ...\n"+"-"*40)
+    num_samples_to_print = 5
+    total_samples = len(test_dataset)
+    step = total_samples // num_samples_to_print
+    sample_indices = [i * step for i in range(num_samples_to_print)]
+    for idx in sample_indices:
         sample = test_dataset[idx]
     
-        # Applicazione trasformazioni e aggiunta della dimensione del batch [1, C, H, W]
         img1_tensor = sample["image1"].unsqueeze(0).to(device)
         img2_tensor = sample["image2"].unsqueeze(0).to(device)
         label = sample["label"]
@@ -129,7 +108,7 @@ def main():
         print(f"Verdetto modello (soglia ottimale={best_threshold:.4f}): {prediction}")
         print("-"*40)
 
-    print("Metriche di riferimento:")
+    print("Metriche di riferimento per intero test set:")
     test_distances, test_labels = collect_distances(model, test_loader, device)
     test_metrics = calculate_metrics(test_distances, test_labels, best_threshold)
     print(f"- Test accuracy: {test_metrics['accuracy']:.4f}")
