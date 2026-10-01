@@ -19,6 +19,9 @@ calcolo metriche per ogni categoria
   stesso autore e stesse parole
   autore diverso e parole diverse
   autore diverso e stesse parole
+kNN
+  dentro singola epoca
+  evoluzione durante varie epoche
 
 ### STRUTTURA 
 ~~IAMDataset~~
