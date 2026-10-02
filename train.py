@@ -11,7 +11,7 @@ from src.siamese_dataset import SiameseDataset
 from src.collate import pad_collate
 from src.losses import ContrastiveLoss
 from src.models.siamese import SiameseNetwork
-from src.evaluation import collect_distances, find_best_threshold, calculate_metrics
+from src.evaluation import collect_distances, find_best_threshold, calculate_metrics, evaluate_and_plot_embeddings
 
 import time
 from pathlib import Path
@@ -196,6 +196,18 @@ def main():
           val_running_loss += loss.item()
 
       val_loss = val_running_loss / len(val_loader)
+      PLOT_INTERVAL = 8
+      should_save_plot = (epoch + 1) % PLOT_INTERVAL == 0 or (epoch + 1) == EPOCHS
+      # kNN calcolato sempre (veloce)
+      knn_acc = evaluate_and_plot_embeddings(
+          base_dataset=dataset, 
+          val_indices=val_indices, 
+          model=model, 
+          device=device, 
+          epoch=epoch + 1, 
+          output_dir=output_dir,
+          save_plot=should_save_plot # t-SNE si disegna solo se should_save_plot è True (lento)
+      )
       if val_loss < best_val_loss:
         best_val_loss = val_loss
         torch.save({
@@ -213,7 +225,7 @@ def main():
           "image_height": IMAGE_HEIGHT
         }, output_model_filename)
 
-      log.log(f"Epoch {epoch + 1}/{EPOCHS}: {epoch_duration:.2f}s - Train loss: {epoch_loss:.4f} - Val loss: {val_loss:.4f}")
+      log.log(f"Epoch {epoch + 1}/{EPOCHS}: {epoch_duration:.2f}s - Train loss: {epoch_loss:.4f} - Val loss: {val_loss:.4f}- k-NN Acc: {knn_acc:.4f}")
 
     total_duration = time.time() - total_start_time
     avg_epoch_duration = sum(epoch_times) / len(epoch_times)
