@@ -23,6 +23,10 @@ kNN
   dentro singola epoca
   evoluzione durante varie epoche
 
+### Separazione dei compiti e DRY
+spostare logica di calcolo della Loss fuori da train in evaluation
+effettuare check su train per eventuali altre separazioni
+
 ### STRUTTURA 
 ~~IAMDataset~~
   ~~gestisce le singole immagini IAM~~

@@ -19,24 +19,38 @@ from src.logger import Logger
 
 def main():
 
-    # Configurazione cartella di output
-    output_dir = Path("outputs")
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    log = Logger(output_dir) 
-    print(f"File di output salvati in: {output_dir.resolve()}")
-    
+    RESUME_TRAINING = True  # Se True, riprende l'addestramento dal checkpoint salvato
     BATCH_SIZE = 32
-    EPOCHS = 40
+    EPOCHS = 60             # per fine tuning
     TRAIN_PAIRS = 32768
     VAL_PAIRS = 4096
     TEST_PAIRS = 8192
-    LEARNING_RATE = 0.001
+    LEARNING_RATE = 0.0001  # per fine tuning
     EMBEDDING_DIM = 128
     MARGIN = 1.0
 
     IMAGE_HEIGHT = 64
     IMAGE_MAX_WIDTH = 320
+
+    # Configurazione cartella di output
+    output_dir = Path("outputs")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Definizione dinamica dei nomi dei file in base al tipo di esecuzione
+    checkpoint_path = output_dir / "best_model.pth"  # Percorso del checkpoint per il fine tuning
+    if RESUME_TRAINING:
+        output_model_filename = output_dir / "best_model_updated.pth"
+        val_results_filename = output_dir / "validation_results_updated.pt"
+        test_results_filename = output_dir / "test_results_updated.pt"
+        log_filename = "training_log_updated.txt"
+    else:
+        output_model_filename = output_dir / "best_model.pth"
+        val_results_filename = output_dir / "validation_results.pt"
+        test_results_filename = output_dir / "test_results.pt"
+        log_filename = "training_log.txt"
+
+    log = Logger(output_dir, filename=log_filename)       # salvataggio nel file di log specifico
+    print(f"File di output salvati in: {output_dir.resolve()}")
 
     log.log(
         f"Parametri di addestramento:\n"
@@ -58,7 +72,6 @@ def main():
         if torch.cuda.is_available()
         else "mps" if torch.backends.mps.is_available() else "cpu"
     )
-
     log.log(f"Utilizzo device: {device}")
 
     transform = Compose([
@@ -127,9 +140,30 @@ def main():
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
     best_val_loss = float("inf")
+    start_epoch = 0
+
+    # Fine tuning: se esiste checkpoint, carica pesi e stato ottimizzatore
+    if RESUME_TRAINING and checkpoint_path.exists():
+        log.log(f"Modalità FINE TUNING: caricamento dei pesi da {checkpoint_path}...")
+        checkpoint = torch.load(checkpoint_path, map_location=device)
+        
+        model.load_state_dict(checkpoint["model_state_dict"])
+        if "optimizer_state_dict" in checkpoint:                # retrocopmpatibilità con modelli senza stato dell'ottimizzatore
+            optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+            log.log("Stato dell'optimizer caricato con successo.")
+        else:
+            log.log("Attenzione: stato dell'optimizer non trovato nel checkpoint. Verrà usato un optimizer nuovo con il nuovo learning rate.")
+        start_epoch = checkpoint["epoch"] 
+        best_val_loss = checkpoint["val_loss"]
+        
+        log.log(f"Ripresa dell'addestramento dall'epoca {start_epoch + 1} (Val Loss precedente: {best_val_loss:.4f})")
+    else:
+        log.log("Modalità TRAINING: nessun peso precedente caricato.")
+
     total_start_time = time.time()    # Istante partenza training
     epoch_times = []
-    for epoch in range(EPOCHS):
+
+    for epoch in range(start_epoch, EPOCHS):
       epoch_start_time = time.time()  # Istante partenza epoca
       model.train()
       running_loss = 0.0
@@ -165,18 +199,19 @@ def main():
       if val_loss < best_val_loss:
         best_val_loss = val_loss
         torch.save({
-        "epoch": epoch + 1,
-        "model_state_dict": model.state_dict(),
-        "val_loss": val_loss,
-        "batch_size": BATCH_SIZE,
-        "train_pairs": TRAIN_PAIRS,
-        "val_pairs": VAL_PAIRS,
-        "test_pairs": TEST_PAIRS,
-        "learning_rate": LEARNING_RATE,
-        "embedding_dim": EMBEDDING_DIM,
-        "margin": MARGIN,
-        "image_height": IMAGE_HEIGHT
-        }, "outputs/best_model.pth")
+          "epoch": epoch + 1,
+          "model_state_dict": model.state_dict(),
+          "optimizer_state_dict": optimizer.state_dict(), # Salvataggio stato optimizer
+          "val_loss": val_loss,
+          "batch_size": BATCH_SIZE,
+          "train_pairs": TRAIN_PAIRS,
+          "val_pairs": VAL_PAIRS,
+          "test_pairs": TEST_PAIRS,
+          "learning_rate": LEARNING_RATE,
+          "embedding_dim": EMBEDDING_DIM,
+          "margin": MARGIN,
+          "image_height": IMAGE_HEIGHT
+        }, output_model_filename)
 
       log.log(f"Epoch {epoch + 1}/{EPOCHS}: {epoch_duration:.2f}s - Train loss: {epoch_loss:.4f} - Val loss: {val_loss:.4f}")
 
@@ -184,8 +219,7 @@ def main():
     avg_epoch_duration = sum(epoch_times) / len(epoch_times)
     log.log(f"Training completato in {total_duration / 60:.2f}min, con una durata media per epoca di {avg_epoch_duration:.2f}s\n"+"-"*40)
 
-    #model.load_state_dict(torch.load("best_model.pth", map_location=device))
-    checkpoint = torch.load("outputs/best_model.pth", map_location=device)
+    checkpoint = torch.load(output_model_filename, map_location=device)
     model.load_state_dict(checkpoint["model_state_dict"])
     log.log(f"Caricato modello migliore: epoca {checkpoint['epoch']}, val loss: {checkpoint['val_loss']:.4f}")
     model.eval()
@@ -199,7 +233,7 @@ def main():
         "labels": val_labels,
         "threshold": best_threshold,
         "accuracy": best_accuracy
-    }, "outputs/validation_results.pt")
+    }, val_results_filename)
 
     test_running_loss = 0.0
 
@@ -224,12 +258,12 @@ def main():
     log.log(f"TP: {test_metrics['true_positive']} - TN: {test_metrics['true_negative']} - FP: {test_metrics['false_positive']} - FN: {test_metrics['false_negative']}")
 
     torch.save({
-    "distances": test_distances,
-    "labels": test_labels,
-    "threshold": best_threshold,
-    "loss": test_loss,
-    "metrics": test_metrics
-    }, "outputs/test_results.pt")
+      "distances": test_distances,
+      "labels": test_labels,
+      "threshold": best_threshold,
+      "loss": test_loss,
+      "metrics": test_metrics
+    }, test_results_filename)
 
     print(f"-"*40+f"\nTutti i file e i log salvati correttamente in: {output_dir}")
     log.close()

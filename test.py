@@ -11,22 +11,42 @@ from src.siamese_dataset import SiameseDataset
 from src.evaluation import collect_distances, calculate_metrics
 from src.transforms import ResizeAndPad
 from src.collate import pad_collate
+from src.logger import Logger
 
 def main():
+    # Flag per scegliere quale versione testare:
+    # True -> testa il modello aggiornato dal fine-tuning (best_model_updated.pth)
+    # False -> testa il modello originale delle prime 40 epoche (best_model.pth)
+    USE_UPDATED_MODEL = True
+
+    output_dir = Path("outputs")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Percorsi dinamici dei file in base al flag
+    if USE_UPDATED_MODEL:
+        model_path = output_dir / "best_model_updated.pth"
+        val_results_path = output_dir / "validation_results_updated.pt"
+        test_results_path = output_dir / "inference_test_results_updated.pt"
+        log_filename = "inference_results_updated.txt"
+    else:
+        model_path = output_dir / "best_model.pth"
+        val_results_path = output_dir / "validation_results.pt"
+        test_results_path = output_dir / "inference_test_results.pt"
+        log_filename = "inference_results.txt"
+
+    # Inizializziamo il Logger per salvare sia a schermo che su file
+    log = Logger(output_dir, filename=log_filename)
+
     device = torch.device(
         "cuda" if torch.cuda.is_available() 
         else "mps" if torch.backends.mps.is_available() 
         else "cpu"
     )
-    print(f"Utilizzo device per il test: {device}")
-
-    # Percorsi dei file generati dal training
-    output_dir = Path("outputs")
-    model_path = output_dir / "best_model.pth"
-    val_results_path = output_dir / "validation_results.pt"
+    log.log(f"Utilizzo device per il test: {device}")
+    log.log(f"Modalità test: {'MODELLO AGGIORNATO (Fine-Tuning)' if USE_UPDATED_MODEL else 'MODELLO BASE (Originale)'}")
 
     if not model_path.exists():
-        print(f"Errore: File dei pesi '{model_path}' non trovato. Esegui prima 'train.py'.")
+        log.log(f"Errore: File dei pesi '{model_path}' non trovato. Esegui prima il training corrispondente.")
         return
 
     # Caricamento del modello migliore
@@ -36,16 +56,17 @@ def main():
     checkpoint = torch.load(model_path, map_location=device)
     model.load_state_dict(checkpoint["model_state_dict"])
     model.eval() # Modalità valutazione
-    print(f"Modello caricato correttamente da '{model_path}' (Epoca {checkpoint['epoch']}).")
+    log.log(f"Modello caricato correttamente da '{model_path}' (Epoca {checkpoint['epoch']}).")
 
     # Recupero della soglia ottimale salvata in validazione
     best_threshold = 0
     if val_results_path.exists():
         val_data = torch.load(val_results_path, map_location=device)
         best_threshold = val_data["threshold"]
-        print(f"Soglia ottimale caricata dal validation set: {best_threshold:.4f}")
+        log.log(f"Soglia ottimale caricata dal validation set: {best_threshold:.4f}")
     else:
-        print(f"Avviso: 'validation_results.pt' non trovato\nChiusura...")
+        log.log(f"Avviso: 'validation_results.pt' non trovato\nChiusura...")
+        log.close()
         return
 
     # Aggiornamento delle trasformazioni con ResizeAndPad
@@ -58,7 +79,7 @@ def main():
     ])
 
     # Ricostruzione esatta del Test Dataset (stesso split e stesso seed del training)
-    print("Caricamento dataset e configurazione test set...")
+    log.log("Caricamento dataset e configurazione test set...")
     dataset = IAMDataset(data_dir="data", granularity="words", transform=transform)
     _, _, test_indices = split_by_writer(dataset)
     
@@ -80,9 +101,9 @@ def main():
         collate_fn=pad_collate
     )
 
-    print("="*40)
-    print("INFERENZA su test set - VERIFICA SCRITTORE")
-    print("\nStampa di alcune coppie di test ...\n"+"-"*40)
+    log.log("="*40)
+    log.log(f"INFERENZA su test set - VERIFICA SCRITTORE ({'MODELLO AGGIORNATO' if USE_UPDATED_MODEL else 'MODELLO BASE'})")
+    log.log("\nStampa di alcune coppie di test ...\n"+"-"*40)
     num_samples_to_print = 5
     total_samples = len(test_dataset)
     step = total_samples // num_samples_to_print
@@ -100,22 +121,34 @@ def main():
             distance = F.pairwise_distance(out1, out2).item()
 
         # Stampa dei risultati e dei percorsi per la verifica visiva
-        print(f"Indice coppia test: {idx}")
-        print(f"Label: {'stesso autore (1)' if label == 1.0 else 'autori diversi (0)'}")
-        print(f"Distanza Euclidea: {distance:.4f}")
+        log.log(f"Indice coppia test: {idx}")
+        log.log(f"Label: {'stesso autore (1)' if label == 1.0 else 'autori diversi (0)'}")
+        log.log(f"Distanza Euclidea: {distance:.4f}")
         
         prediction = "stesso autore" if distance < best_threshold else "autori diversi"
-        print(f"Verdetto modello (soglia ottimale={best_threshold:.4f}): {prediction}")
-        print("-"*40)
+        log.log(f"Verdetto modello (soglia ottimale={best_threshold:.4f}): {prediction}")
+        log.log("-"*40)
 
-    print("Metriche di riferimento per intero test set:")
+    log.log("Metriche di riferimento per intero test set:")
     test_distances, test_labels = collect_distances(model, test_loader, device)
     test_metrics = calculate_metrics(test_distances, test_labels, best_threshold)
-    print(f"- Test accuracy: {test_metrics['accuracy']:.4f}")
-    print(f"- Precision: {test_metrics['precision']:.4f}")
-    print(f"- Recall: {test_metrics['recall']:.4f}")
-    print(f"- F1: {test_metrics['f1']:.4f}")
-    print(f"- TP: {test_metrics['true_positive']} - TN: {test_metrics['true_negative']} - FP: {test_metrics['false_positive']} - FN: {test_metrics['false_negative']}")
+    log.log(f"- Test accuracy: {test_metrics['accuracy']:.4f}")
+    log.log(f"- Precision: {test_metrics['precision']:.4f}")
+    log.log(f"- Recall: {test_metrics['recall']:.4f}")
+    log.log(f"- F1: {test_metrics['f1']:.4f}")
+    log.log(f"- TP: {test_metrics['true_positive']} - TN: {test_metrics['true_negative']} - FP: {test_metrics['false_positive']} - FN: {test_metrics['false_negative']}")
+
+    # Salvataggio strutturato dei risultati in formato .pt (come in train.py)
+    torch.save({
+        "distances": test_distances,
+        "labels": test_labels,
+        "threshold": best_threshold,
+        "metrics": test_metrics
+    }, test_results_path)
+
+    log.log(f"\nRisultati strutturati salvati in: {test_results_path}")
+    log.log(f"Log testuale salvato tramite Logger in: outputs/{log_filename}")
+    log.close()
 
 
 if __name__ == "__main__":
