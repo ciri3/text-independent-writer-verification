@@ -1,4 +1,5 @@
-from PIL import Image
+from PIL import Image, ImageOps
+
 
 class ResizeAndPad:
     def __init__(self, height = 64, max_width = 320):
@@ -32,3 +33,20 @@ class ResizeAndPad:
 
         canvas.paste(resized_image, (left, top))
         return canvas
+
+class NormalizeContrast:
+
+    #il cutoff è un parametro che determina la percentuale di pixel più chiari e più scuri da tagliare prima di calcolare il contrasto. Un valore più alto di cutoff rimuove più pixel estremi, aumentando il contrasto dell'immagine risultante.
+    def __init__(self, cutoff=1):
+
+        self.cutoff = cutoff
+
+    def __call__(self, image):
+
+        return ImageOps.autocontrast(
+
+            image,
+
+            cutoff=self.cutoff
+
+        )
