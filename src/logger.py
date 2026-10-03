@@ -1,4 +1,4 @@
-import sys
+#import sys
 from pathlib import Path
 
 class Logger:
@@ -7,7 +7,7 @@ class Logger:
     su file di testo all'interno di una cartella 'outputs'.
     """
     def __init__(self, output_dir: Path, filename: str = "training_log.txt"):
-        self.terminal = sys.stdout
+        #self.terminal = sys.stdout
         self.log_path = output_dir / filename
         self.log_file = open(self.log_path, "w", encoding="utf-8")
 
