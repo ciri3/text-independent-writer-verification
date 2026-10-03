@@ -14,25 +14,34 @@ from src.collate import pad_collate
 from src.logger import Logger
 
 def main():
-    # Flag per scegliere quale versione testare:
-    # True -> testa il modello aggiornato dal fine-tuning (best_model_updated.pth)
-    # False -> testa il modello originale delle prime 40 epoche (best_model.pth)
-    USE_UPDATED_MODEL = True
 
-    output_dir = Path("outputs")
-    output_dir.mkdir(parents=True, exist_ok=True)
+    # ============================================================
+    # CONFIGURAZIONE
+    # ============================================================
 
-    # Percorsi dinamici dei file in base al flag
-    if USE_UPDATED_MODEL:
-        model_path = output_dir / "best_model_updated.pth"
-        val_results_path = output_dir / "validation_results_updated.pt"
-        test_results_path = output_dir / "inference_test_results_updated.pt"
-        log_filename = "inference_results_updated.txt"
-    else:
-        model_path = output_dir / "best_model.pth"
-        val_results_path = output_dir / "validation_results.pt"
-        test_results_path = output_dir / "inference_test_results.pt"
-        log_filename = "inference_results.txt"
+    CHECKPOINT_PATH = "outputs/run_XXX/best_model.pth"
+
+    TEST_PAIRS = 8192
+    TEST_PAIRS_SEED = 42
+
+    # ============================================================
+    # PERCORSI
+    # ============================================================
+
+    checkpoint_path = Path(CHECKPOINT_PATH)
+    if not checkpoint_path.exists():
+        raise FileNotFoundError(
+            f"Checkpoint non trovato: {checkpoint_path}"
+        )
+    output_dir = checkpoint_path.parent
+
+    val_results_path = output_dir / "validation_results.pt"
+    test_results_path = output_dir / "test_results.pt"
+    log_filename = "test_log.txt"
+
+    # ============================================================
+    # LOGGER E DEVICE
+    # ============================================================
 
     # Inizializziamo il Logger per salvare sia a schermo che su file
     log = Logger(output_dir, filename=log_filename)
@@ -43,35 +52,43 @@ def main():
         else "cpu"
     )
     log.log(f"Utilizzo device per il test: {device}")
-    log.log(f"Modalità test: {'MODELLO AGGIORNATO (Fine-Tuning)' if USE_UPDATED_MODEL else 'MODELLO BASE (Originale)'}")
 
-    if not model_path.exists():
-        log.log(f"Errore: File dei pesi '{model_path}' non trovato. Esegui prima il training corrispondente.")
-        return
+    # ============================================================
+    # CARICAMENTO MODELLO
+    # ============================================================
 
-    # Caricamento del modello migliore
-    embedding_dim = 128
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    embedding_dim = checkpoint["embedding_dim"]
+
     model = SiameseNetwork(embedding_dim=embedding_dim).to(device)
-    
-    checkpoint = torch.load(model_path, map_location=device)
     model.load_state_dict(checkpoint["model_state_dict"])
     model.eval() # Modalità valutazione
-    log.log(f"Modello caricato correttamente da '{model_path}' (Epoca {checkpoint['epoch']}).")
+    log.log(f"Modello caricato correttamente da '{checkpoint_path}' (Epoca {checkpoint['epoch']}).")
+
+    # ============================================================
+    # CARICAMENTO THRESHOLD
+    # ============================================================
 
     # Recupero della soglia ottimale salvata in validazione
-    best_threshold = 0
-    if val_results_path.exists():
-        val_data = torch.load(val_results_path, map_location=device)
-        best_threshold = val_data["threshold"]
-        log.log(f"Soglia ottimale caricata dal validation set: {best_threshold:.4f}")
-    else:
-        log.log(f"Avviso: 'validation_results.pt' non trovato\nChiusura...")
+    if not val_results_path.exists():
+        log.log(f"Validation results non trovati: {val_results_path}")
         log.close()
         return
+    val_data = torch.load(val_results_path, map_location=device)
+    best_threshold = val_data["threshold"]
+    log.log(
+        f"Soglia ottimale caricata dal validation set: "
+        f"{best_threshold:.4f}"
+    )
+
+    # ============================================================
+    # PREPROCESSING E DATASET
+    # ============================================================
 
     # Aggiornamento delle trasformazioni con ResizeAndPad
-    image_height = checkpoint.get("image_height", 64)
-    image_max_width = 320
+    image_height = checkpoint["image_height"]
+    image_max_width = checkpoint["image_max_width"]
+    split_seed = checkpoint["split_seed"]
     
     transform = Compose([
         ResizeAndPad(height=image_height, max_width=image_max_width),
@@ -79,21 +96,25 @@ def main():
     ])
 
     # Ricostruzione esatta del Test Dataset (stesso split e stesso seed del training)
-    log.log("Caricamento dataset e configurazione test set...")
+    #log.log("Caricamento dataset e configurazione test set...")
     dataset = IAMDataset(data_dir="data", granularity="words", transform=transform)
-    _, _, test_indices = split_by_writer(dataset)
+
+    _, _, test_indices = split_by_writer(dataset, seed=split_seed)
+
+    # ============================================================
+    # TEST DATASET E DATALOADER
+    # ============================================================
     
-    test_pairs_count = checkpoint.get("test_pairs", 8192)
     test_dataset = SiameseDataset(
         dataset,
         test_indices,
-        number_of_pairs=test_pairs_count,
+        number_of_pairs=TEST_PAIRS,
         fixed=True,
-        seed=42
+        seed=TEST_PAIRS_SEED
     )
+    
+    batch_size = checkpoint["batch_size"]
 
-    # Creazione del DataLoader di test per le metriche globali
-    batch_size = checkpoint.get("batch_size", 32)
     test_loader = DataLoader(
         test_dataset,
         batch_size=batch_size,
@@ -101,9 +122,14 @@ def main():
         collate_fn=pad_collate
     )
 
-    log.log("="*40)
-    log.log(f"INFERENZA su test set - VERIFICA SCRITTORE ({'MODELLO AGGIORNATO' if USE_UPDATED_MODEL else 'MODELLO BASE'})")
-    log.log("\nStampa di alcune coppie di test ...\n"+"-"*40)
+    
+    # ============================================================
+    # CONTROLLO QUALITATIVO
+    # ============================================================
+    
+    log.log("=" * 40)
+    log.log("CONTROLLO QUALITATIVO SU ALCUNE COPPIE")
+    log.log("Analisi di 5 coppie campione:")
     num_samples_to_print = 5
     total_samples = len(test_dataset)
     step = total_samples // num_samples_to_print
@@ -129,14 +155,30 @@ def main():
         log.log(f"Verdetto modello (soglia ottimale={best_threshold:.4f}): {prediction}")
         log.log("-"*40)
 
-    log.log("Metriche di riferimento per intero test set:")
+
+    # ============================================================
+    # VALUTAZIONE COMPLETA SUL TEST SET
+    # ============================================================
+
+    log.log("=" * 40)
+    log.log("VALUTAZIONE COMPLETA SUL TEST SET")
+    log.log(f"Numero totale coppie nel test set: {len(test_dataset)}")
+    log.log(f"Seed coppie di test: {TEST_PAIRS_SEED}")
+
     test_distances, test_labels = collect_distances(model, test_loader, device)
     test_metrics = calculate_metrics(test_distances, test_labels, best_threshold)
+
+
+    
     log.log(f"- Test accuracy: {test_metrics['accuracy']:.4f}")
     log.log(f"- Precision: {test_metrics['precision']:.4f}")
     log.log(f"- Recall: {test_metrics['recall']:.4f}")
     log.log(f"- F1: {test_metrics['f1']:.4f}")
     log.log(f"- TP: {test_metrics['true_positive']} - TN: {test_metrics['true_negative']} - FP: {test_metrics['false_positive']} - FN: {test_metrics['false_negative']}")
+
+    # ============================================================
+    # SALVATAGGIO RISULTATI
+    # ============================================================
 
     # Salvataggio strutturato dei risultati in formato .pt (come in train.py)
     torch.save({
@@ -147,7 +189,7 @@ def main():
     }, test_results_path)
 
     log.log(f"\nRisultati strutturati salvati in: {test_results_path}")
-    log.log(f"Log testuale salvato tramite Logger in: outputs/{log_filename}")
+    log.log(f"Log testuale salvato tramite Logger in: {output_dir / log_filename}")
     log.close()
 
 

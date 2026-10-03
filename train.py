@@ -11,7 +11,7 @@ from src.siamese_dataset import SiameseDataset
 from src.collate import pad_collate
 from src.losses import ContrastiveLoss
 from src.models.siamese import SiameseNetwork
-from src.evaluation import collect_distances, find_best_threshold, calculate_metrics, evaluate_and_plot_embeddings
+from src.evaluation import collect_distances, find_best_threshold, evaluate_and_plot_embeddings
 from src.run_manager import create_run_dir
 
 import time
@@ -20,15 +20,19 @@ from src.logger import Logger
 
 def main():
 
-    # Configurazione parametri di addestramento
+    # ============================================================
+    #  CONFIGURAZIONE
+    # ============================================================
 
     CHECKPOINT_PATH = None
-    #RESUME_TRAINING = True  # Se True, riprende l'addestramento dal checkpoint salvato
+    SPLIT_SEED = 42         # Seed per la divisione train/val/test 
+    VAL_PAIRS_SEED = 42
+    #RESUME_TRAINING = True # Se True, riprende l'addestramento dal checkpoint salvato
     BATCH_SIZE = 32
     EPOCHS = 60             # per fine tuning
     TRAIN_PAIRS = 32768
     VAL_PAIRS = 4096
-    TEST_PAIRS = 8192
+    #TEST_PAIRS = 8192
     LEARNING_RATE = 0.0001  # per fine tuning
     EMBEDDING_DIM = 128
     MARGIN = 1.0
@@ -36,16 +40,17 @@ def main():
     IMAGE_HEIGHT = 64
     IMAGE_MAX_WIDTH = 320
 
+    # ============================================================
+    #  OUTPUT E CHECKPOINT
+    # ============================================================
+
     # Configurazione cartella di output
-    #output_dir = Path("outputs")
-    #output_dir.mkdir(parents=True, exist_ok=True)
     output_dir = create_run_dir(base_dir="outputs")  # Crea una nuova cartella di run in outputs
 
 
     # File prodotti dalla nuova run
     output_model_filename = output_dir / "best_model.pth"
     val_results_filename = output_dir / "validation_results.pt"
-    test_results_filename = output_dir / "test_results.pt"
     log_filename = "training_log.txt"
 
     checkpoint_path = None
@@ -55,6 +60,10 @@ def main():
 
       if not checkpoint_path.exists():
           raise FileNotFoundError( f"Checkpoint non trovato: {checkpoint_path}")
+
+    # ============================================================
+    #  LOGGER E DEVICE
+    # ============================================================
 
     log = Logger(output_dir, filename=log_filename)       # salvataggio nel file di log specifico
     print(f"File di output salvati in: {output_dir.resolve()}")
@@ -70,7 +79,8 @@ def main():
         f"epochs={EPOCHS}\n"
         f"train_pairs={TRAIN_PAIRS}\n"
         f"val_pairs={VAL_PAIRS}\n"
-        f"test_pairs={TEST_PAIRS}\n"
+        f"split_seed={SPLIT_SEED}\n"
+        f"val_pairs_seed={VAL_PAIRS_SEED}\n"
         f"learning_rate={LEARNING_RATE}\n"
         f"embedding_dim={EMBEDDING_DIM}\n"
         f"margin={MARGIN}\n"
@@ -87,6 +97,10 @@ def main():
 
     log.log(f"Utilizzo device: {device}")
 
+    # ============================================================
+    #  DATASET E SPLIT
+    # ============================================================
+
     transform = Compose([
       ResizeAndPad(height=IMAGE_HEIGHT, max_width=IMAGE_MAX_WIDTH),
       ToTensor()
@@ -98,7 +112,11 @@ def main():
       transform=transform
     )
 
-    train_indices, val_indices, test_indices = split_by_writer(dataset)
+    train_indices, val_indices, _ = split_by_writer(dataset, seed=SPLIT_SEED)
+
+    # ============================================================
+    #  SIAMESE DATASETS E DATALOADERS
+    # ============================================================
 
     train_dataset = SiameseDataset(
       dataset,
@@ -111,16 +129,8 @@ def main():
       val_indices,
       number_of_pairs=VAL_PAIRS,
       fixed=True,
-      seed=42
+      seed=VAL_PAIRS_SEED
     ) 
-
-    test_dataset = SiameseDataset(
-      dataset,
-      test_indices,
-      number_of_pairs=TEST_PAIRS,
-      fixed=True,
-      seed=42
-    )
 
     # le coppie sono gia generate in modo random, quindi non serve shuffle=True, in piu così manteniamo equilibrio tra le classi
     train_loader = DataLoader(
@@ -137,16 +147,13 @@ def main():
         collate_fn=pad_collate
     )    
 
-    test_loader = DataLoader(
-      test_dataset,
-      batch_size=BATCH_SIZE,
-      shuffle=False,
-      collate_fn=pad_collate
-    ) 
-
     log.log(f"Immagini training: {len(train_indices)}")
     log.log(f"Coppie per epoca: {len(train_dataset)}")
     log.log(f"Batch per epoca: {len(train_loader)}")
+
+    # ============================================================
+    #  MODELLO, LOSS E OPTIMIZER
+    # ============================================================
 
     model = SiameseNetwork(embedding_dim=EMBEDDING_DIM).to(device)
     criterion = ContrastiveLoss(margin=MARGIN)
@@ -154,6 +161,10 @@ def main():
 
     best_val_loss = float("inf")
     start_epoch = 0
+
+    # ============================================================
+    #  CARICAMENTO CHECKPOINT (OPZIONALE)
+    # ============================================================
 
     if checkpoint_path is not None:
       log.log(f"Ripresa del training dal checkpoint: {checkpoint_path}")
@@ -186,6 +197,10 @@ def main():
 
     else:
         log.log("Training da zero: nessun checkpoint caricato.")
+
+    # ============================================================
+    #  TRAINING E VALIDAZIONE
+    # ============================================================
 
     total_start_time = time.time()    # Istante partenza training
     epoch_times = []
@@ -251,11 +266,14 @@ def main():
           "batch_size": BATCH_SIZE,
           "train_pairs": TRAIN_PAIRS,
           "val_pairs": VAL_PAIRS,
-          "test_pairs": TEST_PAIRS,
           "learning_rate": LEARNING_RATE,
           "embedding_dim": EMBEDDING_DIM,
           "margin": MARGIN,
-          "image_height": IMAGE_HEIGHT
+          "image_height": IMAGE_HEIGHT,
+          "image_max_width": IMAGE_MAX_WIDTH,
+
+          "split_seed": SPLIT_SEED,
+          "val_pairs_seed": VAL_PAIRS_SEED
         }, output_model_filename)
 
       log.log(f"Epoch {epoch + 1}/{end_epoch}: {epoch_duration:.2f}s - Train loss: {epoch_loss:.4f} - Val loss: {val_loss:.4f}- k-NN Acc: {knn_acc:.4f}")
@@ -264,10 +282,26 @@ def main():
     avg_epoch_duration = sum(epoch_times) / len(epoch_times)
     log.log(f"Training completato in {total_duration / 60:.2f}min, con una durata media per epoca di {avg_epoch_duration:.2f}s\n"+"-"*40)
 
+    # ============================================================
+    #  CARICAMENTO DEL MIGLIOR MODELLO DELLA RUN
+    # ============================================================
+
+    if not output_model_filename.exists():
+      log.log(
+          "Nessun nuovo modello ha migliorato il checkpoint di partenza. "
+          "La run termina senza salvare un nuovo modello."
+      )
+      log.close()
+      return
+
     checkpoint = torch.load(output_model_filename, map_location=device)
     model.load_state_dict(checkpoint["model_state_dict"])
     log.log(f"Caricato modello migliore: epoca {checkpoint['epoch']}, val loss: {checkpoint['val_loss']:.4f}")
     model.eval()
+
+    # ============================================================
+    #  CALCOLO THRESHOLD SUL VALIDATION SET
+    # ============================================================
 
     val_distances, val_labels = collect_distances(model, val_loader, device)
     best_threshold, best_accuracy = find_best_threshold(val_distances, val_labels)
@@ -279,36 +313,6 @@ def main():
         "threshold": best_threshold,
         "accuracy": best_accuracy
     }, val_results_filename)
-
-    test_running_loss = 0.0
-
-    with torch.no_grad():
-        for batch in test_loader:
-            img1 = batch["image1"].to(device)
-            img2 = batch["image2"].to(device)
-            labels = batch["label"].to(device)
-
-            output1, output2 = model(img1, img2)
-            loss = criterion(output1, output2, labels)
-            test_running_loss += loss.item()
-
-    test_loss = test_running_loss / len(test_loader)
-    log.log(f"Test loss: {test_loss:.4f}")
-    test_distances, test_labels = collect_distances(model, test_loader, device)
-    test_metrics = calculate_metrics(test_distances, test_labels, best_threshold)
-    log.log(f"Test accuracy: {test_metrics['accuracy']:.4f}")
-    log.log(f"Precision: {test_metrics['precision']:.4f}")
-    log.log(f"Recall: {test_metrics['recall']:.4f}")
-    log.log(f"F1: {test_metrics['f1']:.4f}")
-    log.log(f"TP: {test_metrics['true_positive']} - TN: {test_metrics['true_negative']} - FP: {test_metrics['false_positive']} - FN: {test_metrics['false_negative']}")
-
-    torch.save({
-      "distances": test_distances,
-      "labels": test_labels,
-      "threshold": best_threshold,
-      "loss": test_loss,
-      "metrics": test_metrics
-    }, test_results_filename)
 
     print(f"-"*40+f"\nTutti i file e i log salvati correttamente in: {output_dir}")
     log.close()
