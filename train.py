@@ -18,20 +18,29 @@ import time
 from pathlib import Path
 from src.logger import Logger
 
+#bisogna usare un seed per standirzzare tutti i random del programma
+
 def main():
 
     # ============================================================
     #  CONFIGURAZIONE
     # ============================================================
 
+    PLOT_INTERVAL = 1
+    PLOT_NUM_WRITERS = 10
+    PLOT_SAMPLES_PER_WRITER = 30
+    PLOT_SAMPLE_SEED = 42 #determina quali immagine venongono selezionate per il plot
+
+
     CHECKPOINT_PATH = None
+
     SPLIT_SEED = 42         # Seed per la divisione train/val/test 
     VAL_PAIRS_SEED = 42
     #RESUME_TRAINING = True # Se True, riprende l'addestramento dal checkpoint salvato
     BATCH_SIZE = 32
-    EPOCHS = 60             # per fine tuning
-    TRAIN_PAIRS = 32768
-    VAL_PAIRS = 4096
+    EPOCHS = 2             # per fine tuning
+    TRAIN_PAIRS = 1024
+    VAL_PAIRS = 512
     #TEST_PAIRS = 8192
     LEARNING_RATE = 0.0001  # per fine tuning
     EMBEDDING_DIM = 128
@@ -46,6 +55,8 @@ def main():
 
     # Configurazione cartella di output
     output_dir = create_run_dir(base_dir="outputs")  # Crea una nuova cartella di run in outputs
+    plots_dir = output_dir / "plots"
+    plots_dir.mkdir()
 
 
     # File prodotti dalla nuova run
@@ -241,18 +252,24 @@ def main():
           val_running_loss += loss.item()
 
       val_loss = val_running_loss / len(val_loader)
-      PLOT_INTERVAL = 8
-      should_save_plot = (epoch + 1) % PLOT_INTERVAL == 0 or (epoch + 1) == end_epoch
-      # kNN calcolato sempre (veloce)
-      knn_acc = evaluate_and_plot_embeddings(
-          base_dataset=dataset, 
-          val_indices=val_indices, 
-          model=model, 
-          device=device, 
-          epoch=epoch + 1, 
-          output_dir=output_dir,
-          save_plot=should_save_plot # t-SNE si disegna solo se should_save_plot è True (lento)
-      )
+      
+      should_save_plot = ((epoch + 1) == 1 or (epoch + 1) % PLOT_INTERVAL == 0 or (epoch + 1) == end_epoch)       
+
+      if should_save_plot:
+        evaluate_and_plot_embeddings(
+            base_dataset=dataset, 
+            val_indices=val_indices, 
+            model=model, 
+            device=device, 
+            epoch=epoch + 1, 
+            output_dir=plots_dir,
+            num_writers=PLOT_NUM_WRITERS,
+            samples_per_writer=PLOT_SAMPLES_PER_WRITER,
+            sample_seed=PLOT_SAMPLE_SEED,
+            save_plot=True # t-SNE si disegna solo se should_save_plot è True (lento)
+        )
+      
+
       if val_loss < best_val_loss:
         best_val_loss = val_loss
         torch.save({
@@ -276,7 +293,7 @@ def main():
           "val_pairs_seed": VAL_PAIRS_SEED
         }, output_model_filename)
 
-      log.log(f"Epoch {epoch + 1}/{end_epoch}: {epoch_duration:.2f}s - Train loss: {epoch_loss:.4f} - Val loss: {val_loss:.4f}- k-NN Acc: {knn_acc:.4f}")
+      log.log(f"Epoch {epoch + 1}/{end_epoch}: {epoch_duration:.2f}s - Train loss: {epoch_loss:.4f} - Val loss: {val_loss:.4f}")
 
     total_duration = time.time() - total_start_time
     avg_epoch_duration = sum(epoch_times) / len(epoch_times)
@@ -298,6 +315,23 @@ def main():
     model.load_state_dict(checkpoint["model_state_dict"])
     log.log(f"Caricato modello migliore: epoca {checkpoint['epoch']}, val loss: {checkpoint['val_loss']:.4f}")
     model.eval()
+
+    best_plot_path = plots_dir / f"embedding_space_epoch_{checkpoint['epoch']}.png"
+
+    #creiamo il grafico del miglior modello
+    if not best_plot_path.exists():
+      evaluate_and_plot_embeddings(
+      base_dataset=dataset,
+      val_indices=val_indices,
+      model=model,
+      device=device,
+      epoch=checkpoint["epoch"],
+      output_dir=plots_dir,
+      num_writers=PLOT_NUM_WRITERS,
+      samples_per_writer=PLOT_SAMPLES_PER_WRITER,
+      sample_seed=PLOT_SAMPLE_SEED,
+      save_plot=True
+      )
 
     # ============================================================
     #  CALCOLO THRESHOLD SUL VALIDATION SET

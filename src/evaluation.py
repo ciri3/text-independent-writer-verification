@@ -3,13 +3,9 @@ import torch.nn.functional as F
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.manifold import TSNE
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.metrics import accuracy_score
-from torch.utils.data import DataLoader
-from torchvision.transforms import Compose, ToTensor
-from src.transforms import ResizeAndPad
-from src.collate import pad_collate
+from torch.utils.data import DataLoader, Subset
 from pathlib import Path
+
 
 
 def collect_distances(model, data_loader, device):
@@ -93,23 +89,93 @@ def calculate_metrics(distances, labels, threshold):
     "false_negative": false_negative
     }
 
-def evaluate_and_plot_embeddings(base_dataset, val_indices, model, device, epoch, output_dir, k=5, max_samples=1000, save_plot=False):
+
+
+def evaluate_and_plot_embeddings(base_dataset, val_indices, model, device, epoch, output_dir,    num_writers=10, samples_per_writer=30, sample_seed=42, save_plot=False):
     """
-    Estrae gli embedding, calcola l'accuratezza k-NN e, se save_plot=True, 
-    salva anche il grafico t-SNE in formato PNG.
+    Estrae gli embedding delle immagini di validazione e, se save_plot=True,
+    salva la loro visualizzazione t-SNE in formato PNG.
     """
     model.eval()
     
     # Creiamo un DataLoader temporaneo per scorrere le singole immagini di validazione
     # (riutilizzando le stesse trasformazioni del dataset)
-    from torch.utils.data import Subset
     val_subset = Subset(base_dataset, val_indices)
+
+    writer_counts = {}
+    for sample in val_subset:
+        writer_id = sample["writer_id"]
+        if writer_id not in writer_counts:
+            writer_counts[writer_id] = 0
+        writer_counts[writer_id] += 1
+
+    print(f"Numero di writer: {len(writer_counts)}")
+    print(f"Minimo immagini per writer: {min(writer_counts.values())}")
+    print(f"Massimo immagini per writer: {max(writer_counts.values())}")
+
+    eligible_writers = [
+    writer_id
+    for writer_id, count in writer_counts.items()
+    if count >= samples_per_writer
+]
+
+    print(
+        f"Writer con almeno {samples_per_writer} immagini: "
+        f"{len(eligible_writers)}"
+    )
+
+    actual_num_writers = min(num_writers, len(eligible_writers))
+
+    if actual_num_writers == 0:
+        raise ValueError(
+            f"Nessun writer possiede almeno {samples_per_writer} immagini."
+        )
+
+    if actual_num_writers < num_writers:
+        print(
+            f"Richiesti {num_writers} writer, ma solo "
+            f"{actual_num_writers} soddisfano il requisito. "
+            f"Verranno utilizzati tutti quelli disponibili."
+        )
+
+    rng = np.random.default_rng(sample_seed)
+
+    selected_writers = rng.choice(
+        eligible_writers,
+        size=actual_num_writers,
+        replace=False
+    )
+
+    print(f"Writer selezionati: {selected_writers}")
+
+    selected_indices = []
+
+    for writer_id in selected_writers:
+
+        writer_indices = []
+
+        for index in val_indices:
+            sample = base_dataset[index]
+
+            if sample["writer_id"] == writer_id:
+                writer_indices.append(index)
+
+        chosen_indices = rng.choice(
+            writer_indices,
+            size=samples_per_writer,
+            replace=False
+        )
+
+        selected_indices.extend(chosen_indices)
+        
+    val_subset = Subset(base_dataset, selected_indices)
     
-    # Scegliamo un sottoinsieme se sono troppe, per velocizzare t-SNE e k-NN
-    if len(val_subset) > max_samples:
-        # Prendiamo un campione fisso o casuale
-        indices = np.random.choice(len(val_subset), max_samples, replace=False)
-        val_subset = Subset(base_dataset, [val_indices[i] for i in indices])
+    # Scegliamo un sottoinsieme se ci sono troppe immagini, per velocizzare t-SNE
+    #if len(val_subset) > max_samples:
+    #    # Prendiamo un campione fisso o casuale
+    #    rng = np.random.default_rng(sample_seed)
+    #    indices = rng.choice(len(val_subset), max_samples, replace=False)
+    #    val_subset = Subset(base_dataset, [val_indices[i] for i in indices])
 
     eval_loader = DataLoader(
         val_subset,
@@ -130,28 +196,24 @@ def evaluate_and_plot_embeddings(base_dataset, val_indices, model, device, epoch
             writers = batch["writer_id"]
             
             # Estrazione embedding (usando forward_once o l'encoder della Siamese)
-            if hasattr(model, "forward_once"):
-                embs = model.forward_once(imgs)
-            else:
+            #if hasattr(model, "forward_once"):
+            #    embs = model.forward_once(imgs)
+            #else:
                 # Se non ha forward_once, passiamo l'immagine due volte o adattiamo
-                embs, _ = model(imgs, imgs)
-                
+            #    embs, _ = model(imgs, imgs)
+
+            embs = model.forward_one(imgs)
+
             embeddings_list.append(embs.cpu().numpy())
             labels_list.extend(writers)
             
     X = np.vstack(embeddings_list)
     y = np.array(labels_list)
     
-    # Calcolo Accuratezza k-NN sullo spazio degli embedding
-    knn = KNeighborsClassifier(n_neighbors=k, metric='euclidean')
-    knn.fit(X, y)
-    preds = knn.predict(X)
-    knn_accuracy = accuracy_score(y, preds)
-    
     # Riduzione dimensionale con t-SNE per la visualizzazione 2D
     # t-SNE e salvataggio grafico eseguiti SOLO se save_plot è True
     if save_plot:
-        tsne = TSNE(n_components=2, random_state=42, perplexity=30, n_iter=1000)
+        tsne = TSNE(n_components=2, random_state=42, perplexity=30, max_iter=1000)
         X_2d = tsne.fit_transform(X)
         
         unique_writers = list(set(y))
@@ -160,7 +222,7 @@ def evaluate_and_plot_embeddings(base_dataset, val_indices, model, device, epoch
 
         plt.figure(figsize=(10, 8))
         scatter = plt.scatter(X_2d[:, 0], X_2d[:, 1], c=y_numeric, cmap='tab10', alpha=0.6, s=15)
-        plt.title(f"Spazio degli Embedding - Epoca {epoch} ($k$-NN Acc: {knn_accuracy:.4f})")
+        plt.title(f"Spazio degli Embedding - Epoca {epoch}")
         plt.xlabel("t-SNE Dimension 1")
         plt.ylabel("t-SNE Dimension 2")
         plt.colorbar(scatter, label="Writer Clusters")
@@ -169,5 +231,3 @@ def evaluate_and_plot_embeddings(base_dataset, val_indices, model, device, epoch
         plot_path = Path(output_dir) / f"embedding_space_epoch_{epoch}.png"
         plt.savefig(plot_path, dpi=300, bbox_inches='tight')
         plt.close()
-    
-    return knn_accuracy
