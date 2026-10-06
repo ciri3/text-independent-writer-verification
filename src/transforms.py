@@ -42,11 +42,7 @@ class NormalizeContrast:
         self.cutoff = cutoff
 
     def __call__(self, image):
-
         return ImageOps.autocontrast(
-
             image,
-
             cutoff=self.cutoff
-
         )

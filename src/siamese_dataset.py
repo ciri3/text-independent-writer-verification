@@ -3,7 +3,7 @@ from torch.utils.data import Dataset
 
 #nel dataloader mettere random a false
 class SiameseDataset(Dataset):
-    def __init__(self, base_dataset, indices, number_of_pairs=100000, fixed = False, seed = 42):
+    def __init__(self, base_dataset, indices, number_of_pairs=100000, fixed = False, seed = 42, transform=None):
 
         self.base_dataset = base_dataset
         self.indices = indices
@@ -14,6 +14,7 @@ class SiameseDataset(Dataset):
         self.fixed = fixed
         self.seed = seed
 
+        self.transform = transform
 
         # Selezioniamo i metadati in base alla granularità del dataset
         if self.base_dataset.granularity == "words":
@@ -163,9 +164,16 @@ class SiameseDataset(Dataset):
         sample1 = self.base_dataset[index1]
         sample2 = self.base_dataset[index2]
 
+        image1 = sample1["image"]
+        image2 = sample2["image"]
+
+        if self.transform is not None:
+            image1 = self.transform(image1)
+            image2 = self.transform(image2)
+
         return {
-            "image1": sample1["image"],
-            "image2": sample2["image"],
+            "image1": image1,
+            "image2": image2,
             "label": label
         }
 

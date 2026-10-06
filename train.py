@@ -1,11 +1,12 @@
+import random
 import torch
 import torch.optim as optim
 
 from torch.utils.data import DataLoader
-from torchvision.transforms import Compose, ToTensor
+from torchvision.transforms import Compose, ToTensor, RandomAffine
 
 from src.dataset import IAMDataset
-from src.transforms import ResizeAndPad
+from src.transforms import ResizeAndPad, NormalizeContrast
 from src.split import split_by_writer
 from src.siamese_dataset import SiameseDataset
 from src.collate import pad_collate
@@ -18,6 +19,8 @@ import time
 from pathlib import Path
 from src.logger import Logger
 
+
+
 #bisogna usare un seed per standirzzare tutti i random del programma
 
 def main():
@@ -26,7 +29,10 @@ def main():
     #  CONFIGURAZIONE
     # ============================================================
 
-    PLOT_INTERVAL = 1
+    #seed generale 
+    SEED = 42
+
+    PLOT_INTERVAL = 8
     PLOT_NUM_WRITERS = 10
     PLOT_SAMPLES_PER_WRITER = 30
     PLOT_SAMPLE_SEED = 42 #determina quali immagine venongono selezionate per il plot
@@ -36,18 +42,29 @@ def main():
 
     SPLIT_SEED = 42         # Seed per la divisione train/val/test 
     VAL_PAIRS_SEED = 42
+
     #RESUME_TRAINING = True # Se True, riprende l'addestramento dal checkpoint salvato
     BATCH_SIZE = 32
-    EPOCHS = 2             # per fine tuning
-    TRAIN_PAIRS = 1024
-    VAL_PAIRS = 512
-    #TEST_PAIRS = 8192
-    LEARNING_RATE = 0.0001  # per fine tuning
+    EPOCHS = 60             
+    TRAIN_PAIRS = 32768
+    VAL_PAIRS = 4096
+
+    LEARNING_RATE = 0.001  
     EMBEDDING_DIM = 128
     MARGIN = 1.0
 
     IMAGE_HEIGHT = 64
     IMAGE_MAX_WIDTH = 320
+
+    # ============================================================
+    #  RANDOM SEED
+    # ============================================================
+
+    random.seed(SEED)
+    torch.manual_seed(SEED)
+
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(SEED)
 
     # ============================================================
     #  OUTPUT E CHECKPOINT
@@ -86,6 +103,7 @@ def main():
 
     log.log(
         f"Parametri di addestramento:\n"
+        f"seed={SEED}\n"
         f"batch_size={BATCH_SIZE}\n"
         f"epochs={EPOCHS}\n"
         f"train_pairs={TRAIN_PAIRS}\n"
@@ -112,15 +130,15 @@ def main():
     #  DATASET E SPLIT
     # ============================================================
 
-    transform = Compose([
-      ResizeAndPad(height=IMAGE_HEIGHT, max_width=IMAGE_MAX_WIDTH),
-      ToTensor()
+    base_transform = Compose([
+      NormalizeContrast(cutoff=1),
+      ResizeAndPad(height=IMAGE_HEIGHT, max_width=IMAGE_MAX_WIDTH)
     ])
 
     dataset = IAMDataset(
       data_dir="data",
       granularity="words",
-      transform=transform
+      transform=base_transform
     )
 
     train_indices, val_indices, _ = split_by_writer(dataset, seed=SPLIT_SEED)
@@ -129,10 +147,21 @@ def main():
     #  SIAMESE DATASETS E DATALOADERS
     # ============================================================
 
+    #shear=1
+    train_transform = Compose([
+      RandomAffine(degrees=3, translate=(0.03, 0.08), scale=(0.95, 1.05),fill=255),
+      ToTensor()
+    ])
+
+    eval_transform = Compose([
+        ToTensor()  
+    ])
+
     train_dataset = SiameseDataset(
       dataset,
       train_indices,
       number_of_pairs=TRAIN_PAIRS,
+      transform=train_transform
     )
 
     val_dataset = SiameseDataset(
@@ -140,7 +169,8 @@ def main():
       val_indices,
       number_of_pairs=VAL_PAIRS,
       fixed=True,
-      seed=VAL_PAIRS_SEED
+      seed=VAL_PAIRS_SEED, 
+      transform=eval_transform
     ) 
 
     # le coppie sono gia generate in modo random, quindi non serve shuffle=True, in piu così manteniamo equilibrio tra le classi
@@ -279,6 +309,8 @@ def main():
           "val_loss": val_loss,
 
           "parent_checkpoint": CHECKPOINT_PATH,
+
+          "seed": SEED,
 
           "batch_size": BATCH_SIZE,
           "train_pairs": TRAIN_PAIRS,

@@ -3,6 +3,7 @@ import torch.nn.functional as F
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.manifold import TSNE
+from torchvision.transforms.functional import to_tensor
 from torch.utils.data import DataLoader, Subset
 from pathlib import Path
 
@@ -182,7 +183,7 @@ def evaluate_and_plot_embeddings(base_dataset, val_indices, model, device, epoch
         batch_size=32,
         shuffle=False,
         collate_fn=lambda b: {
-            "image": torch.stack([x["image"] for x in b]),
+            "image": torch.stack([to_tensor(x["image"]) for x in b]),
             "writer_id": [x["writer_id"] for x in b]
         }
     )
