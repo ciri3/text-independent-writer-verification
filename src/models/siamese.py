@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 class HandwritingEncoder(nn.Module):
@@ -34,6 +35,8 @@ class HandwritingEncoder(nn.Module):
   def forward(self, x):
     x = self.features(x)
     x = self.fc(x)
+    # Normalizzazione L2 lungo la dimensione delle feature (embeddings di una dimensione più piccoli)
+    x = F.normalize(x, p=2, dim=1)
     return x
 
 
