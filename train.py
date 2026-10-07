@@ -14,6 +14,7 @@ from src.losses import ContrastiveLoss
 from src.models.siamese import SiameseNetwork
 from src.evaluation import collect_distances, find_best_threshold, evaluate_and_plot_embeddings
 from src.run_manager import create_run_dir
+from src.early_stopping import EarlyStopping
 
 import time
 from pathlib import Path
@@ -45,12 +46,12 @@ def main():
 
     #RESUME_TRAINING = True # Se True, riprende l'addestramento dal checkpoint salvato
     BATCH_SIZE = 32
-    EPOCHS = 60             
+    EPOCHS = 100            # valore di sicurezza se l'early stopping non ferma il training prima             
     TRAIN_PAIRS = 32768
     VAL_PAIRS = 4096
 
     LEARNING_RATE = 0.001  
-    EMBEDDING_DIM = 128
+    EMBEDDING_DIM = 256
     MARGIN = 1.0
 
     IMAGE_HEIGHT = 64
@@ -199,6 +200,16 @@ def main():
     model = SiameseNetwork(embedding_dim=EMBEDDING_DIM).to(device)
     criterion = ContrastiveLoss(margin=MARGIN)
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(               # LR scheduler con suoi parametri (da capire)
+      optimizer, 
+      mode='min',         # la validation loss è da minimizzare
+      factor=0.5,         # dimezzamento del LR
+      patience=4,         # dopo quante epoche parte la riduzione
+      threshold=0.0005,   # sensibilità alla variazione dello scheduler
+      min_lr=1e-6         # LR min sotto cui non può scendere (evita rottura del training)
+    )
+
+    early_stopping = EarlyStopping(patience=8, min_delta=0.0005)    # stop del training se non migliora (pazienza di 8 epoche)
 
     best_val_loss = float("inf")
     start_epoch = 0
@@ -282,6 +293,8 @@ def main():
           val_running_loss += loss.item()
 
       val_loss = val_running_loss / len(val_loader)
+
+      scheduler.step(val_loss) # Adatta automaticamente il LR SE val_loss non migliora
       
       should_save_plot = ((epoch + 1) == 1 or (epoch + 1) % PLOT_INTERVAL == 0 or (epoch + 1) == end_epoch)       
 
@@ -325,7 +338,12 @@ def main():
           "val_pairs_seed": VAL_PAIRS_SEED
         }, output_model_filename)
 
-      log.log(f"Epoch {epoch + 1}/{end_epoch}: {epoch_duration:.2f}s - Train loss: {epoch_loss:.4f} - Val loss: {val_loss:.4f}")
+      current_lr = optimizer.param_groups[0]["lr"] # recupera il LR corrente per tracciarlo nei log
+      log.log(f"Epoch {epoch + 1}/{end_epoch}: {epoch_duration:.2f}s - LR: {current_lr:.6f} - Train loss: {epoch_loss:.4f} - Val loss: {val_loss:.4f}")
+
+      if early_stopping(val_loss): # L'Early Stopping controlla se è il momento di interrompere il training
+              log.log(f"\nEarly stopping attivato all'epoca {epoch + 1}\n")
+              break
 
     total_duration = time.time() - total_start_time
     avg_epoch_duration = sum(epoch_times) / len(epoch_times)
