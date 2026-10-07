@@ -12,7 +12,13 @@ from src.siamese_dataset import SiameseDataset
 from src.collate import pad_collate
 from src.losses import ContrastiveLoss
 from src.models.siamese import SiameseNetwork
-from src.evaluation import collect_distances, find_best_threshold, evaluate_and_plot_embeddings
+from src.evaluation import (
+  collect_distances,
+  find_best_threshold,
+  evaluate_and_plot_embeddings,
+  calculate_disaggregated_metrics,
+  calculate_eer_and_plot_roc,
+  )
 from src.run_manager import create_run_dir
 from src.early_stopping import EarlyStopping
 
@@ -390,12 +396,32 @@ def main():
     val_distances, val_labels = collect_distances(model, val_loader, device)
     best_threshold, best_accuracy = find_best_threshold(val_distances, val_labels)
 
-    log.log(f"Best threshold: {best_threshold:.4f} - Validation accuracy: {best_accuracy:.4f}")
+    # calcolo EER e generazione della curva ROC per validation set
+    val_eer = calculate_eer_and_plot_roc(val_distances, val_labels, plots_dir)
+
+    # estrazione dei tipi di coppia (0, 1, 2, 3) presenti nel val_dataset
+    val_pair_types = [
+        val_dataset._generate_pair(i)[2] if not val_dataset.fixed 
+        else val_dataset._fixed_pairs[i][2]  # Recupera il tipo di coppia
+        for i in range(len(val_dataset))
+    ]
+    
+    # Metriche disaggregate
+    disaggregated_val = calculate_disaggregated_metrics(
+        val_distances, val_labels, val_pair_types, best_threshold
+    )
+
+    log.log(f"Best threshold: {best_threshold:.4f} - Validation accuracy: {best_accuracy:.4f} - EER: {val_eer:.4f}")
+    log.log("\nMetriche per categoria sul validation set:")
+    for category, metrics in disaggregated_val.items():
+        log.log(f" - {category:<32}: Accuracy = {metrics['accuracy']:.4f} | Dist. media = {metrics['mean_distance']:.4f}")
     torch.save({
         "distances": val_distances,
         "labels": val_labels,
         "threshold": best_threshold,
-        "accuracy": best_accuracy
+        "accuracy": best_accuracy,
+        "eer": val_eer,
+        "disaggregated_metrics": disaggregated_val
     }, val_results_filename)
 
     print(f"-"*40+f"\nTutti i file e i log salvati correttamente in: {output_dir}")

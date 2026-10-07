@@ -8,7 +8,12 @@ from src.models.siamese import SiameseNetwork
 from src.dataset import IAMDataset
 from src.split import split_by_writer
 from src.siamese_dataset import SiameseDataset
-from src.evaluation import collect_distances, calculate_metrics
+from src.evaluation import (
+    collect_distances,
+    calculate_metrics,
+    calculate_disaggregated_metrics,
+    calculate_eer_and_plot_roc,
+)
 from src.transforms import ResizeAndPad
 from src.collate import pad_collate
 from src.logger import Logger
@@ -160,21 +165,44 @@ def main():
     # VALUTAZIONE COMPLETA SUL TEST SET
     # ============================================================
 
+    test_distances, test_labels = collect_distances(model, test_loader, device)
+    test_metrics = calculate_metrics(test_distances, test_labels, best_threshold)
+    # calcolo EER e salvataggio della curva ROC nella cartella di run del test
+    test_eer = calculate_eer_and_plot_roc(test_distances, test_labels, output_dir)
+
+    # calcolo metriche disaggregate sulle 4 categorie
+    test_pair_types = [
+        test_dataset._generate_pair(i)[2] if not test_dataset.fixed
+        else test_dataset._fixed_pairs[i][2]
+        for i in range(len(test_dataset))
+    ]
+    disaggregated_test = calculate_disaggregated_metrics(
+        test_distances, test_labels, test_pair_types, best_threshold
+    )
+
     log.log("=" * 40)
     log.log("VALUTAZIONE COMPLETA SUL TEST SET")
     log.log(f"Numero totale coppie nel test set: {len(test_dataset)}")
     log.log(f"Seed coppie di test: {TEST_PAIRS_SEED}")
+    log.log(f"Soglia applicata: {best_threshold:.4f}")
 
-    test_distances, test_labels = collect_distances(model, test_loader, device)
-    test_metrics = calculate_metrics(test_distances, test_labels, best_threshold)
-
-
-    
     log.log(f"- Test accuracy: {test_metrics['accuracy']:.4f}")
     log.log(f"- Precision: {test_metrics['precision']:.4f}")
     log.log(f"- Recall: {test_metrics['recall']:.4f}")
     log.log(f"- F1: {test_metrics['f1']:.4f}")
+    log.log(f"- EER (Equal Error Rate): {test_eer:.4f}")
     log.log(f"- TP: {test_metrics['true_positive']} - TN: {test_metrics['true_negative']} - FP: {test_metrics['false_positive']} - FN: {test_metrics['false_negative']}")
+
+    log.log("=" * 40)
+    log.log("PRESTAZIONI PER CATEGORIA DI COPPIA:")
+    log.log(f"{'Categoria':<35} | {'Accuracy':<10} | {'Dist. Media':<12} | {'Campioni':<8}")
+    log.log("-" * 72)
+    for cat_name, cat_m in disaggregated_test.items():
+        log.log(
+            f"{cat_name:<35} | {cat_m['accuracy']:.4f}     | "
+            f"{cat_m['mean_distance']:.4f}      | {cat_m['total_samples']:<8}"
+        )
+    log.log("=" * 40)
 
     # ============================================================
     # SALVATAGGIO RISULTATI
@@ -185,7 +213,9 @@ def main():
         "distances": test_distances,
         "labels": test_labels,
         "threshold": best_threshold,
-        "metrics": test_metrics
+        "metrics": test_metrics,
+        "eer": test_eer,
+        "disaggregated_metrics": disaggregated_test
     }, test_results_path)
 
     log.log(f"\nRisultati strutturati salvati in: {test_results_path}")

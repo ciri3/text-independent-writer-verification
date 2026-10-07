@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as F
 import numpy as np
+from sklearn.metrics import roc_curve
 import matplotlib.pyplot as plt
 from sklearn.manifold import TSNE
 from torchvision.transforms.functional import to_tensor
@@ -135,9 +136,9 @@ def evaluate_and_plot_embeddings(
             writer_counts[writer_id] = 0
         writer_counts[writer_id] += 1
 
-    print(f"Numero di writer: {len(writer_counts)}")
-    print(f"Minimo immagini per writer: {min(writer_counts.values())}")
-    print(f"Massimo immagini per writer: {max(writer_counts.values())}")
+    #print(f"Numero di writer: {len(writer_counts)}")
+    #print(f"Minimo immagini per writer: {min(writer_counts.values())}")
+    #print(f"Massimo immagini per writer: {max(writer_counts.values())}")
 
     eligible_writers = [
     writer_id
@@ -145,10 +146,7 @@ def evaluate_and_plot_embeddings(
     if count >= samples_per_writer
     ]
 
-    print(
-        f"Writer con almeno {samples_per_writer} immagini: "
-        f"{len(eligible_writers)}"
-    )
+    #print(f"Writer con almeno {samples_per_writer} immagini: "f"{len(eligible_writers)}")
 
     actual_num_writers = min(num_writers, len(eligible_writers))
 
@@ -172,7 +170,7 @@ def evaluate_and_plot_embeddings(
         replace=False
     )
 
-    print(f"Writer selezionati: {selected_writers}")
+    #print(f"Writer selezionati: {selected_writers}")
 
     selected_indices = []
 
@@ -257,3 +255,84 @@ def evaluate_and_plot_embeddings(
         plot_path = Path(output_dir) / f"embedding_space_epoch_{epoch}.png"
         plt.savefig(plot_path, dpi=300, bbox_inches='tight')
         plt.close()
+
+def calculate_disaggregated_metrics(
+    distances: list[float],
+    labels: list[float],
+    pair_types: list[int],
+    threshold: float,
+    ) -> dict[str, dict[str, float]]:
+    """
+        Calcola le metriche di accuratezza separate per ciascuna delle 4 categorie di coppia:
+        - same_writer_different_text
+        - same_writer_same_text
+        - different_writer_different_text
+        - different_writer_same_text
+    """
+    categories = {
+        0: "same_writer_different_text",
+        1: "same_writer_same_text",
+        2: "different_writer_different_text",
+        3: "different_writer_same_text",
+    }
+    
+    results = {}
+    
+    for type_id, category in categories.items():
+        # estrazione distanze e label per categoria corrente
+        cat_distances = [d for d, t in zip(distances, pair_types) if t == type_id]
+        cat_labels = [l for l, t in zip(labels, pair_types) if t == type_id]
+
+        # se non ci sono campioni per la categoria, salta il calcolo delle metriche
+        if not cat_labels:
+            continue
+
+        # conta quanti campioni correttamente classificati in questa categoria
+        correct = sum(
+            1 for dist, label in zip(cat_distances, cat_labels)
+            if (1 if dist < threshold else 0) == label
+        )
+        accuracy = correct / len(cat_labels)                                    # accuracy
+        mean_dist = float(np.mean(cat_distances)) if cat_distances else 0.0     # distanza media
+        
+        results[category] = {
+            "accuracy": accuracy,
+            "mean_distance": mean_dist,
+            "total_samples": len(cat_labels),
+        }
+        
+    return results
+
+def calculate_eer_and_plot_roc(
+        distances: list[float],
+        labels: list[float],
+        output_path: Path | str,
+    ) -> float:
+    """Calcola l'Equal Error Rate (EER) e salva il grafico della Curva ROC."""
+
+    # Convertiamo le distanze in score di similarità (più è piccola la distanza, più sono simili)
+    # perché la funzione roc di scikit assume valori più alti come più probabili positivi (noi contrario)
+    scores = [-d for d in distances]
+    
+    fpr, tpr, thresholds = roc_curve(labels, scores)    # False Pos. Rate e True Pos. Rate
+    fnr = 1 - tpr                                       # False Neg. Rate
+    
+    # punto in cui FPR "=" FNR
+    eer_threshold_idx = np.nanargmin(np.absolute(fnr - fpr))
+    eer = float(fpr[eer_threshold_idx])
+    
+    plt.figure(figsize=(7, 6))
+    plt.plot(fpr, tpr, color="darkorange", lw=2, label=f"ROC Curve (EER = {eer:.4f})")
+    plt.plot([0, 1], [0, 1], color="navy", lw=1, linestyle="--")
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    plt.xlabel("False Positive Rate (FAR)")
+    plt.ylabel("True Positive Rate (1 - FRR)")
+    plt.title("Receiver Operating Characteristic (ROC)")
+    plt.legend(loc="lower right")
+    plt.grid(True, linestyle="--", alpha=0.5)
+    
+    plt.savefig(Path(output_path) / "roc_curve.png", dpi=300, bbox_inches="tight")
+    plt.close()
+    
+    return eer
