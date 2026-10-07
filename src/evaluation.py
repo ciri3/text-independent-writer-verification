@@ -6,10 +6,20 @@ from sklearn.manifold import TSNE
 from torchvision.transforms.functional import to_tensor
 from torch.utils.data import DataLoader, Subset
 from pathlib import Path
+from typing import Any
 
 
 
-def collect_distances(model, data_loader, device):
+def collect_distances(
+    model: torch.nn.Module, 
+    data_loader: DataLoader, 
+    device: torch.device
+    ) -> tuple[list[float], list[int]]:
+    """
+        Esegue l'inferenza sul DataLoader e raccoglie la lista delle distanze euclidee
+        e delle corrispondenti label reali.
+    """
+
     model.eval()
 
     all_distances = []
@@ -29,7 +39,9 @@ def collect_distances(model, data_loader, device):
 
     return all_distances, all_labels
 
-def find_best_threshold(distances, labels):
+def find_best_threshold(distances: list[float], labels: list[int]) -> tuple[float, float]:
+    """Trova la soglia di distanza che massimizza l'accuracy sul set fornito."""
+
     best_threshold = None
     best_accuracy = 0.0
     
@@ -56,7 +68,9 @@ def find_best_threshold(distances, labels):
 
     return best_threshold, best_accuracy
 
-def calculate_metrics(distances, labels, threshold):
+def calculate_metrics(distances: list[float], labels: list[float], threshold: float) -> dict[str, Any]:
+    """Calcola le metriche classiche di classificazione (Accuracy, Precision, Recall, F1, Matrice di Confusione)."""
+    
     true_positive = 0
     true_negative = 0
     false_positive = 0
@@ -92,7 +106,18 @@ def calculate_metrics(distances, labels, threshold):
 
 
 
-def evaluate_and_plot_embeddings(base_dataset, val_indices, model, device, epoch, output_dir,    num_writers=10, samples_per_writer=30, sample_seed=42, save_plot=False):
+def evaluate_and_plot_embeddings(
+    base_dataset: Any, 
+    val_indices: list[int], 
+    model: torch.nn.Module, 
+    device: torch.device, 
+    epoch: int, 
+    output_dir: Path | str,
+    num_writers: int = 10, 
+    samples_per_writer: int = 30, 
+    sample_seed: int = 42, 
+    save_plot: bool = False
+    ) -> None:
     """
     Estrae gli embedding delle immagini di validazione e, se save_plot=True,
     salva la loro visualizzazione t-SNE in formato PNG.
@@ -118,7 +143,7 @@ def evaluate_and_plot_embeddings(base_dataset, val_indices, model, device, epoch
     writer_id
     for writer_id, count in writer_counts.items()
     if count >= samples_per_writer
-]
+    ]
 
     print(
         f"Writer con almeno {samples_per_writer} immagini: "

@@ -9,13 +9,13 @@ class ContrastiveLoss(nn.Module):
       - Label = 1.0 se stesso writer (spinge gli embedding vicini)
       - Label = 0.0 se writer diversi (spinge gli embedding ad almeno una distanza
       pari a 'margin')
-      """
+    """
     
-    def __init__(self, margin=1.0):
+    def __init__(self, margin: float = 1.0) -> None:
         super().__init__()
         self.margin = margin
 
-    def forward(self, output1, output2, label):
+    def forward(self, output1: torch.Tensor, output2: torch.Tensor, label: torch.Tensor) -> torch.Tensor:
         euclidean_distance = F.pairwise_distance(output1, output2)
 
         loss_positive = label * torch.pow(euclidean_distance, 2)

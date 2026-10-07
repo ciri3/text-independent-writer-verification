@@ -1,14 +1,24 @@
 import random
 from torch.utils.data import Dataset
+from typing import Any, Callable, Optional
 
 #nel dataloader mettere random a false
 class SiameseDataset(Dataset):
-    def __init__(self, base_dataset, indices, number_of_pairs=100000, fixed = False, seed = 42, transform=None):
+    """Dataset PyTorch per la generazione di coppie bilanciate per l'addestramento siamese."""
+
+    def __init__(
+        self, 
+        base_dataset: Any,
+        indices: list[int],
+        number_of_pairs: int = 100000,
+        fixed: bool = False,
+        seed: int = 42,
+        transform: Optional[Callable[[Any], Any]] = None
+        ) -> None:
 
         self.base_dataset = base_dataset
         self.indices = indices
         self.number_of_pairs = number_of_pairs
-
 
         #il seed serve solo quando fixed è True per generare sempre le stesse coppie, altrimenti non ha effetto
         self.fixed = fixed
@@ -58,7 +68,7 @@ class SiameseDataset(Dataset):
             random.setstate(random_state)
         #fine nuovo
 
-    def _same_writer_different_text(self):
+    def _same_writer_different_text(self) -> tuple[int, int]:
         while True:
             writer_id = random.choice(self.writer_ids)
             texts = list(self.writer_to_text_indices[writer_id].keys())
@@ -71,7 +81,7 @@ class SiameseDataset(Dataset):
 
         return index1, index2
 
-    def _same_writer_same_text(self):
+    def _same_writer_same_text(self) -> tuple[int, int]:
 
         while True:
             writer_id = random.choice(self.writer_ids)
@@ -92,7 +102,7 @@ class SiameseDataset(Dataset):
         return index1, index2
 
 
-    def _different_writer_different_text(self):
+    def _different_writer_different_text(self) -> tuple[int, int]:
         while True:
             writer1, writer2 = random.sample(self.writer_ids, 2)
             text1 = random.choice(
@@ -113,7 +123,7 @@ class SiameseDataset(Dataset):
 
         return index1, index2
 
-    def _different_writer_same_text(self):
+    def _different_writer_same_text(self) -> tuple[int, int]:
         while True:
             writer1, writer2 = random.sample(self.writer_ids, 2)
 
@@ -134,7 +144,7 @@ class SiameseDataset(Dataset):
 
         return index1, index2
 
-    def _generate_pair(self, idx):
+    def _generate_pair(self, idx: int) -> tuple[int, int, int]:
         pair_type = idx % 4
 
         if pair_type == 0:
@@ -152,10 +162,10 @@ class SiameseDataset(Dataset):
 
         return index1, index2, label
 
-    def __len__(self):
+    def __len__(self) -> int:
         return self.number_of_pairs
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int) -> dict[str, Any]:
         if self.fixed:
             index1, index2, label = self.fixed_pairs[idx]
         else:

@@ -1,7 +1,12 @@
 import torch
 import torch.nn.functional as F
+from typing import Any
 
-def pad_collate(batch):
+def pad_collate(batch: list[dict[str, Any]]) -> dict[str, torch.Tensor]:
+    """
+        Collate function personalizzata per eseguire il padding dinamico della larghezza
+        delle immagini all'interno dello stesso batch.
+    """
     images1 = [sample["image1"] for sample in batch]
     images2 = [sample["image2"] for sample in batch]
 

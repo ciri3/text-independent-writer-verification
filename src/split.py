@@ -1,6 +1,16 @@
 import random
+from typing import Any
 
-def split_by_writer(dataset, train_ratio=0.70, val_ratio=0.15, seed=42):
+def split_by_writer(
+    dataset: Any, 
+    train_ratio: float = 0.70, 
+    val_ratio: float = 0.15, 
+    seed: int = 42
+    ) -> tuple[list[int], list[int], list[int]]:
+    """
+        Divide gli indici dei campioni del dataset in train/val/test garantendo
+        che gli autori (writer_id) siano disgiunti fra i 3 sottoinsiemi.
+    """
 
     if not 0 < train_ratio < 1:
         raise ValueError("train_ratio must be between 0 and 1")

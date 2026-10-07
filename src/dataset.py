@@ -1,18 +1,22 @@
 from pathlib import Path
 from PIL import Image
 import xml.etree.ElementTree as ET
+from typing import Any, Callable, Optional
 
 from torch.utils.data import Dataset
 
 
 class IAMDataset(Dataset):
+    """Dataset PyTorch per la gestione delle immagini e dei metadati del dataset IAM."""
     
+    def __init__(
+        self,
+        data_dir: str | Path = "data",
+        granularity: str = "words",
+        transform: Optional[Callable[[Image.Image], Any]] = None,
+        min_text_length: int = 2
+        ) -> None:
 
-    def __init__(self,
-                data_dir="data", 
-                granularity="words", 
-                transform=None,
-                min_text_length=2):
         self.data_dir = Path(data_dir)
         self.granularity = granularity
         self.transform = transform
@@ -26,7 +30,7 @@ class IAMDataset(Dataset):
         self.words = []
         self._load_metadata()
 
-    def __len__(self):
+    def __len__(self) -> int:
         if self.granularity == "lines":
             return len(self.lines)
         elif self.granularity == "words":
@@ -37,7 +41,7 @@ class IAMDataset(Dataset):
             raise ValueError(f"Invalid granularity: {self.granularity}")
 
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int) -> dict[str, Any]:
         if self.granularity == "lines":
             metadata = self.lines[idx]
         elif self.granularity == "words":
@@ -64,7 +68,9 @@ class IAMDataset(Dataset):
         }
 
         
-    def _load_metadata(self):
+    def _load_metadata(self) -> None:
+        """Metodo interno per il parsing dei file XML e l'estrazione dei metadati."""
+
         for xml_path in self.xml_dir.glob("*.xml"):
 
             tree = ET.parse(xml_path)

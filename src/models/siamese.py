@@ -6,7 +6,7 @@ import torch.nn.functional as F
 class HandwritingEncoder(nn.Module):
   """Encoder CNN di base per estrarre feature dallo stile di scrittura."""
 
-  def __init__(self, embedding_dim=128):
+  def __init__(self, embedding_dim: int =128) -> None:
     super(HandwritingEncoder, self).__init__()
 
     self.features = nn.Sequential(
@@ -32,7 +32,7 @@ class HandwritingEncoder(nn.Module):
         nn.Linear(128, embedding_dim),
     )
 
-  def forward(self, x):
+  def forward(self, x: torch.Tensor) -> torch.Tensor:
     x = self.features(x)
     x = self.fc(x)
     # Normalizzazione L2 lungo la dimensione delle feature (embeddings di una dimensione più piccoli)
@@ -43,14 +43,14 @@ class HandwritingEncoder(nn.Module):
 class SiameseNetwork(nn.Module):
   """Siamese Network che condivide gli stessi pesi per confrontare due immagini."""
 
-  def __init__(self, embedding_dim=128):
+  def __init__(self, embedding_dim: int = 128) -> None:
     super(SiameseNetwork, self).__init__()
     self.encoder = HandwritingEncoder(embedding_dim=embedding_dim)
 
-  def forward_one(self, x):
+  def forward_one(self, x: torch.Tensor) -> torch.Tensor:
     return self.encoder(x)
 
-  def forward(self, input1, input2):
+  def forward(self, input1: torch.Tensor, input2: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     # Ottiene gli embedding per entrambe le immagini in parallelo
     output1 = self.forward_one(input1)
     output2 = self.forward_one(input2)

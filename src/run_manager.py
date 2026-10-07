@@ -1,7 +1,9 @@
 from pathlib import Path
 
 
-def create_run_dir(base_dir="outputs"):
+def create_run_dir(base_dir: str | Path = "outputs") -> Path:
+    """Crea in modo incrementale la cartella isolata per la nuova run (es: outputs/run_XXX)"""
+
     base_dir = Path(base_dir)
     base_dir.mkdir(parents=True, exist_ok=True)
 

@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Any
 
 from PIL import Image
 import torch
@@ -10,12 +11,13 @@ from src.transforms import ResizeAndPad
 
 
 class WriterVerifier:
+    """Classe per eseguire inferenza in tempo reale su una coppia di immagini."""
 
     def __init__(
         self,
-        model_path="models/best_model.pth",
-        threshold=0.5520,
-    ):
+        model_path: str | Path = "models/best_model.pth",
+        threshold: float = 0.5520,
+    ) -> None:
         self.threshold = threshold
 
         # Seleziona automaticamente il miglior device disponibile
@@ -56,7 +58,7 @@ class WriterVerifier:
         # Disattiva il comportamento specifico del training
         self.model.eval()
 
-    def _load_image(self, image_path):
+    def _load_image(self, image_path: str | Path) -> torch.Tensor:
 
         image_path = Path(image_path)
 
@@ -76,7 +78,7 @@ class WriterVerifier:
 
         return image.to(self.device)
 
-    def compare(self, image1_path, image2_path):
+    def compare(self, image1_path: str | Path, image2_path: str | Path) -> dict[str, Any]:
 
         image1 = self._load_image(image1_path)
         image2 = self._load_image(image2_path)

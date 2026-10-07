@@ -2,10 +2,9 @@ from pathlib import Path
 import torch
 
 class EarlyStopping:
-    '''
-    Interrompe l'addestramento se la validation loss non migliora dopo una determinata "pazienza".
-    '''
-    def __init__(self, patience: int = 7, min_delta: float = 0.0001, verbose: bool = True):
+    """Interrompe l'addestramento se la validation loss non migliora dopo una determinata "pazienza"."""
+    
+    def __init__(self, patience: int = 7, min_delta: float = 0.0001, verbose: bool = True) -> None:
         self.patience = patience
         self.min_delta = min_delta
         self.verbose = verbose
