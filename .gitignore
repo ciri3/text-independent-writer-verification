@@ -226,6 +226,9 @@ checkpoints/
 *.pth
 *.ckpt
 
+# personal files
+im_inf/
+
 # Training outputs
 outputs/
 
