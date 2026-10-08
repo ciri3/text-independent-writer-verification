@@ -402,7 +402,7 @@ def main():
     # estrazione dei tipi di coppia (0, 1, 2, 3) presenti nel val_dataset
     val_pair_types = [
         val_dataset._generate_pair(i)[2] if not val_dataset.fixed 
-        else val_dataset._fixed_pairs[i][2]  # Recupera il tipo di coppia
+        else val_dataset.fixed_pairs[i][2]  # Recupera il tipo di coppia
         for i in range(len(val_dataset))
     ]
     

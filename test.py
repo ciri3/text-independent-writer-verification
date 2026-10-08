@@ -173,7 +173,7 @@ def main():
     # calcolo metriche disaggregate sulle 4 categorie
     test_pair_types = [
         test_dataset._generate_pair(i)[2] if not test_dataset.fixed
-        else test_dataset._fixed_pairs[i][2]
+        else test_dataset.fixed_pairs[i][2]
         for i in range(len(test_dataset))
     ]
     disaggregated_test = calculate_disaggregated_metrics(
