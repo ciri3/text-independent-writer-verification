@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 import numpy as np
-from sklearn.metrics import roc_curve
+from sklearn.metrics import roc_curve, auc
 import matplotlib.pyplot as plt
 from sklearn.manifold import TSNE
 from torchvision.transforms.functional import to_tensor
@@ -307,7 +307,7 @@ def calculate_eer_and_plot_roc(
         distances: list[float],
         labels: list[float],
         output_path: Path | str,
-    ) -> float:
+    ) -> tuple[float, float]:
     """Calcola l'Equal Error Rate (EER) e salva il grafico della Curva ROC."""
 
     # Convertiamo le distanze in score di similarità (più è piccola la distanza, più sono simili)
@@ -320,9 +320,11 @@ def calculate_eer_and_plot_roc(
     # punto in cui FPR "=" FNR
     eer_threshold_idx = np.nanargmin(np.absolute(fnr - fpr))
     eer = float(fpr[eer_threshold_idx])
+    roc_auc = float(auc(fpr, tpr))
+
     
     plt.figure(figsize=(7, 6))
-    plt.plot(fpr, tpr, color="darkorange", lw=2, label=f"ROC Curve (EER = {eer:.4f})")
+    plt.plot(fpr, tpr, color="darkorange", lw=2,label=f"ROC Curve (AUC = {roc_auc:.4f}, EER = {eer:.4f})")
     plt.plot([0, 1], [0, 1], color="navy", lw=1, linestyle="--")
     plt.xlim([0.0, 1.0])
     plt.ylim([0.0, 1.05])
@@ -335,4 +337,4 @@ def calculate_eer_and_plot_roc(
     plt.savefig(Path(output_path) / "roc_curve.png", dpi=300, bbox_inches="tight")
     plt.close()
     
-    return eer
+    return eer, roc_auc

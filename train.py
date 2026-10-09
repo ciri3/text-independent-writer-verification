@@ -402,7 +402,7 @@ def main():
     torch.save(checkpoint, output_model_filename)
 
     # calcolo EER e generazione della curva ROC per validation set
-    val_eer = calculate_eer_and_plot_roc(val_distances, val_labels, plots_dir)
+    val_eer, val_auc = calculate_eer_and_plot_roc(val_distances, val_labels, plots_dir)
 
     # estrazione dei tipi di coppia (0, 1, 2, 3) presenti nel val_dataset
     
@@ -414,7 +414,7 @@ def main():
         val_distances, val_labels, val_pair_types, best_threshold
     )
 
-    log.log(f"Best threshold: {best_threshold:.4f} - Validation accuracy: {best_accuracy:.4f} - EER: {val_eer:.4f}")
+    log.log(f"Best threshold: {best_threshold:.4f} - Validation accuracy: {best_accuracy:.4f} - EER: {val_eer:.4f} - AUC: {val_auc:.4f}")
     log.log("\nMetriche per categoria sul validation set:")
     for category, metrics in disaggregated_val.items():
         log.log(f" - {category:<32}: Accuracy = {metrics['accuracy']:.4f} | Dist. media = {metrics['mean_distance']:.4f}")
@@ -424,6 +424,7 @@ def main():
         "threshold": best_threshold,
         "accuracy": best_accuracy,
         "eer": val_eer,
+        "auc": val_auc,
         "disaggregated_metrics": disaggregated_val
     }, val_results_filename)
 

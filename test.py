@@ -14,7 +14,7 @@ from src.evaluation import (
     calculate_disaggregated_metrics,
     calculate_eer_and_plot_roc,
 )
-from src.transforms import ResizeAndPad
+from src.transforms import ResizeAndPad, NormalizeContrast
 from src.collate import pad_collate
 from src.logger import Logger
 
@@ -96,6 +96,7 @@ def main():
     split_seed = checkpoint["split_seed"]
     
     transform = Compose([
+        NormalizeContrast(cutoff=1),
         ResizeAndPad(height=image_height, max_width=image_max_width),
         ToTensor()
     ])
@@ -168,15 +169,10 @@ def main():
     test_distances, test_labels = collect_distances(model, test_loader, device)
     test_metrics = calculate_metrics(test_distances, test_labels, best_threshold)
     # calcolo EER e salvataggio della curva ROC nella cartella di run del test
-    test_eer = calculate_eer_and_plot_roc(test_distances, test_labels, output_dir)
+    test_eer, test_auc = calculate_eer_and_plot_roc(test_distances, test_labels, output_dir)
 
     # calcolo metriche disaggregate sulle 4 categorie
-    """
-    test_pair_types = [
-        test_dataset._generate_pair(i)[2] if not test_dataset.fixed
-        else test_dataset.fixed_pairs[i][2]
-        for i in range(len(test_dataset))
-    ]"""
+    
     test_pair_types = [i % 4 for i in range(len(test_dataset))]
 
     
@@ -195,6 +191,7 @@ def main():
     log.log(f"- Recall: {test_metrics['recall']:.4f}")
     log.log(f"- F1: {test_metrics['f1']:.4f}")
     log.log(f"- EER (Equal Error Rate): {test_eer:.4f}")
+    log.log(f"- AUC (Area Under ROC Curve): {test_auc:.4f}")
     log.log(f"- TP: {test_metrics['true_positive']} - TN: {test_metrics['true_negative']} - FP: {test_metrics['false_positive']} - FN: {test_metrics['false_negative']}")
 
     log.log("=" * 40)
@@ -219,6 +216,7 @@ def main():
         "threshold": best_threshold,
         "metrics": test_metrics,
         "eer": test_eer,
+        "auc": test_auc,
         "disaggregated_metrics": disaggregated_test
     }, test_results_path)
 
