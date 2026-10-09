@@ -396,6 +396,11 @@ def main():
     val_distances, val_labels = collect_distances(model, val_loader, device)
     best_threshold, best_accuracy = find_best_threshold(val_distances, val_labels)
 
+    # Aggiunge la threshold al checkpoint del modello migliore
+    checkpoint["threshold"] = float(best_threshold)
+    checkpoint["val_accuracy"] = float(best_accuracy)
+    torch.save(checkpoint, output_model_filename)
+
     # calcolo EER e generazione della curva ROC per validation set
     val_eer = calculate_eer_and_plot_roc(val_distances, val_labels, plots_dir)
 

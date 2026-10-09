@@ -7,7 +7,8 @@ import torch.nn.functional as F
 from torchvision.transforms import Compose, ToTensor
 
 from src.models.siamese import SiameseNetwork
-from src.transforms import ResizeAndPad
+from src.transforms import ResizeAndPad, NormalizeContrast
+
 
 
 class WriterVerifier:
@@ -15,10 +16,8 @@ class WriterVerifier:
 
     def __init__(
         self,
-        model_path: str | Path = "models/best_model.pth",
-        threshold: float = 0.5520,
+        model_path: str | Path = "models/best_model.pth"
     ) -> None:
-        self.threshold = threshold
 
         # Seleziona automaticamente il miglior device disponibile
         self.device = torch.device(
@@ -27,36 +26,42 @@ class WriterVerifier:
             else "cpu"
         )
 
-        # Stesso preprocessing utilizzato durante training/test
-        self.transform = Compose([
-            ResizeAndPad(height=64, max_width=320),
-            ToTensor()
-        ])
-
-        # Stessa architettura utilizzata durante il training
-        self.model = SiameseNetwork(
-            embedding_dim=128
-        ).to(self.device)
+        
 
         # Caricamento checkpoint
         model_path = Path(model_path)
-
         if not model_path.exists():
-            raise FileNotFoundError(
-                f"Modello non trovato: {model_path}"
-            )
+            raise FileNotFoundError(f"Modello non trovato: {model_path}")
 
         checkpoint = torch.load(
             model_path,
-            map_location=self.device
+            map_location=self.device,
+            weights_only=True
         )
+
+        # Stesso preprocessing utilizzato durante training/test
+        self.transform = Compose([
+            NormalizeContrast(),
+            ResizeAndPad(height=checkpoint["image_height"],max_width=checkpoint["image_max_width"]),
+            ToTensor()
+        ])
+
+         # Recupera la configurazione dal checkpoint
+        embedding_dim = checkpoint["embedding_dim"]
+        self.threshold = checkpoint["threshold"]
+
+        # Stessa architettura utilizzata durante il training
+        self.model = SiameseNetwork(
+            embedding_dim=embedding_dim
+        ).to(self.device)
+
 
         self.model.load_state_dict(
             checkpoint["model_state_dict"]
         )
-
         # Disattiva il comportamento specifico del training
         self.model.eval()
+
 
     def _load_image(self, image_path: str | Path) -> torch.Tensor:
 
