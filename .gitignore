@@ -226,7 +226,7 @@ checkpoints/
 *.pth
 *.ckpt
 
-# personal files
+# Local inference images
 im_inf/
 
 # Training outputs

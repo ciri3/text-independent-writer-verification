@@ -171,11 +171,15 @@ def main():
     test_eer = calculate_eer_and_plot_roc(test_distances, test_labels, output_dir)
 
     # calcolo metriche disaggregate sulle 4 categorie
+    """
     test_pair_types = [
         test_dataset._generate_pair(i)[2] if not test_dataset.fixed
         else test_dataset.fixed_pairs[i][2]
         for i in range(len(test_dataset))
-    ]
+    ]"""
+    test_pair_types = [i % 4 for i in range(len(test_dataset))]
+
+    
     disaggregated_test = calculate_disaggregated_metrics(
         test_distances, test_labels, test_pair_types, best_threshold
     )

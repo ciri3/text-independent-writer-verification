@@ -400,11 +400,9 @@ def main():
     val_eer = calculate_eer_and_plot_roc(val_distances, val_labels, plots_dir)
 
     # estrazione dei tipi di coppia (0, 1, 2, 3) presenti nel val_dataset
-    val_pair_types = [
-        val_dataset._generate_pair(i)[2] if not val_dataset.fixed 
-        else val_dataset.fixed_pairs[i][2]  # Recupera il tipo di coppia
-        for i in range(len(val_dataset))
-    ]
+    
+    val_pair_types = [i % 4 for i in range(len(val_dataset))]
+
     
     # Metriche disaggregate
     disaggregated_val = calculate_disaggregated_metrics(
